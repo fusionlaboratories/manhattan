@@ -25,6 +25,7 @@ pkgs.mkShell {
         
         pkgs.ghc
         pkgs.zlib
+        pkgs.gnupg
         # ghc
     ];
 }

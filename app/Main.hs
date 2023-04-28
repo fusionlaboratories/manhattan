@@ -8,7 +8,8 @@ module Main where
 import Types
 import Committee
 import Data.Aeson
-import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString as BS
 -- import qualified Data.ByteString.Lazy.Char8 as C
 -- import Crypto.Hash.SHA256 ( hash )
 import Utils
@@ -41,6 +42,7 @@ instance FromJSON APIToken where
     <$> v .: "endpoint"
     <*> v .: "token"
 
+{-
 main :: IO ()
 main = do
   putStrLn ""
@@ -81,7 +83,7 @@ main = do
   -- cm <- fetchCommitteesAtSlot apiToken startingSlot
   -- print (length cm)
   -- print (length (head cm))
-
+-}
 -- | Recursively run elections from the starting epoch up to the catching up epoch
 runElections :: APIToken -> LightState -> Epoch -> Epoch -> IO ()
 runElections apiToken state epoch endEpoch = do
@@ -145,8 +147,11 @@ fetchCommitteesAtSlot apiToken slot = do
       putStrLn $ ">>> Failed to fetch committees at slot " ++ show slot ++ " from QuickNode. <<<"
       throwIO err
 
-{-
+--{-
 
+main :: IO ()
+main = do
+  putStrLn $ "Test RANDAO election"
   -- raw <- BS.readFile "/Users/nschoe/Downloads/committee_call_ex_1.json"
   -- let committeeData = decode raw :: Maybe CommitteeData
   -- putStrLn $ "Decoded: " ++ show committeeData
@@ -163,19 +168,18 @@ fetchCommitteesAtSlot apiToken slot = do
 
   -- Parse validators (for now, static, from file, hand-fetched for the given epoch)
   -- raw <- BS.readFile "./data/all_validators.json"
-  raw <- BS.readFile "./data/all_validators_195094.json" -- Getting a more up-to-date list of validators should not influence (due to indices)
+  raw <- LBS.readFile "./data/all_validators_195094.json" -- Getting a more up-to-date list of validators should not influence (due to indices)
   let (Just validatorsData) = decode raw :: Maybe ValidatorsData
       allValidators = vdData validatorsData
 
   let startingSlot = 6149664
-      -- initialRandao = 0x80b848d9795bd5154036a4278c33c4363b0600343b964f3c127f8a93bc3271a7 -- https://etherscan.io/block/16976234#consensusinfo
-      -- initialRandao = 0xb36d237e9c00bc4a1220146e1f7fee1ab6c0a412999cb1fa99661514ea432b68 -- Last randao from 2 epochs before (1 + minSeedLookAhead)
-      initialRandao = 0x374677f793d1fecca4ffad2287319d2406fa7025a1b754ebefc8dedff843e37f -- Same as above, but with the hash + xor applied (so next one)
+      -- initialRandao = 0x374677f793d1fecca4ffad2287319d2406fa7025a1b754ebefc8dedff843e37f -- Same as above, but with the hash + xor applied (so next one)
+      initialRandao = BS.reverse (serializeInteger 0x374677f793d1fecca4ffad2287319d2406fa7025a1b754ebefc8dedff843e37f 32)-- Same as above, but with the hash + xor applied (so next one)
       initialState = LightState
         { currSlot   = startingSlot
         , validators = allValidators
         -- , randaoMixes = take 61103 (repeat 0) ++ (61104 : take (65536 - 61103 - 1) (repeat 0))
-        , randaoMixes = take 61103 (repeat 0) ++ (initialRandao : take (65536 - 61103 - 1) (repeat 0))
+        , randaoMixes = take 61103 (repeat BS.empty) ++ (initialRandao : take (65536 - 61103 - 1) (repeat BS.empty))
         }
       epoch = epochFromSlot (currSlot initialState)
 
@@ -193,4 +197,4 @@ fetchCommitteesAtSlot apiToken slot = do
   -- let committeeIdx = 111111
       -- val = (validators initialState) !! committeeIdx
   -- putStrLn $ "Committee @ " ++ show committeeIdx ++ ": is active (" ++ show (isActiveValidator val epoch) ++ ")\n" ++ show val
-  -}
+  ---}

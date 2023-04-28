@@ -67,8 +67,8 @@ type Message = ByteString
 data LightState = LightState
     { currSlot         :: Slot
     , validators :: [Validator]
-    -- , validatorIndexes :: [ValidatorIndex] -- 
-    , randaoMixes      :: [Integer] -- epochsPerHistoricalVector elements
+    -- , randaoMixes      :: [Integer] -- epochsPerHistoricalVector elements
+    , randaoMixes      :: [ByteString] -- epochsPerHistoricalVector elements
     }
 
 data Validator = Validator

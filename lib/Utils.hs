@@ -41,15 +41,16 @@ getCommitteeCountPerSlot state epoch = max 1 $ min maxCommitteesPerSlot (l `div`
     where l = toInteger (length (getActiveValidatorIndices state epoch))
 
 -- domainTypeValues :: DomainType -> Word32
-domainTypeValues :: DomainType -> Integer
-domainTypeValues DOMAIN_BEACON_PROPOSER     = 0x00000000
-domainTypeValues DOMAIN_BEACON_ATTESTER     = 0x01000000
-domainTypeValues DOMAIN_RANDAO              = 0x02000000
-domainTypeValues DOMAIN_DEPOSIT             = 0x03000000
-domainTypeValues DOMAIN_VOLUNTARY_EXIT      = 0x04000000
-domainTypeValues DOMAIN_SELECTION_PROOF     = 0x05000000
-domainTypeValues DOMAIN_AGGREGATE_AND_PROOF = 0x06000000
-domainTypeValues DOMAIN_APPLICATION_MASK    = 0x00000001
+-- domainTypeValues :: DomainType -> Integer
+domainTypeValues :: DomainType -> ByteString
+domainTypeValues DOMAIN_BEACON_PROPOSER     = BS.pack [0x00, 0x00, 0x00, 0x00]
+domainTypeValues DOMAIN_BEACON_ATTESTER     = BS.pack [0x01, 0x00, 0x00, 0x00]
+domainTypeValues DOMAIN_RANDAO              = BS.pack [0x02, 0x00, 0x00, 0x00]
+domainTypeValues DOMAIN_DEPOSIT             = BS.pack [0x03, 0x00, 0x00, 0x00]
+domainTypeValues DOMAIN_VOLUNTARY_EXIT      = BS.pack [0x04, 0x00, 0x00, 0x00]
+domainTypeValues DOMAIN_SELECTION_PROOF     = BS.pack [0x05, 0x00, 0x00, 0x00]
+domainTypeValues DOMAIN_AGGREGATE_AND_PROOF = BS.pack [0x06, 0x00, 0x00, 0x00]
+domainTypeValues DOMAIN_APPLICATION_MASK    = BS.pack [0x00, 0x00, 0x00, 0x01]
 
 -- | Return the seed for a given epoch
 -- getSeed :: LightState -> Epoch -> DomainType -> Word256
@@ -58,14 +59,15 @@ getSeed state epoch domain =
     -- let mix = serializeInteger (getRandaoMix state (epoch + epochsPerHistoricalVector - minSeedLookAhead - 1)) 32
     -- in hash $ (serializeInteger (domainTypeValues domain) 4) `BS.append` (serializeInteger epoch 8) `BS.append` mix
     -- CRAZY (I don't get it) weird big vs littel andian manipulations (based on Tobia's data!)
-    let mix = serializeInteger (getRandaoMix state (epoch + epochsPerHistoricalVector - minSeedLookAhead - 1)) 32
-        preimage = (BS.reverse (serializeInteger (domainTypeValues domain) 4)) `BS.append` (serializeInteger epoch 8) `BS.append` (BS.reverse mix)
+    let mix = getRandaoMix state (epoch + epochsPerHistoricalVector - minSeedLookAhead - 1)
+        preimage = (domainTypeValues domain) `BS.append` (serializeInteger epoch 8) `BS.append` mix
     in hash preimage
               
 
 -- | Return the randao mix at a recent epoch
 -- getRandaoMix :: LightState -> Epoch -> Word256
-getRandaoMix :: LightState -> Epoch -> Integer
+-- getRandaoMix :: LightState -> Epoch -> Integer
+getRandaoMix :: LightState -> Epoch -> ByteString
 getRandaoMix state epoch = let n = epoch_ `mod` epochsPerHistoricalVector
                            in mixes !! (fromInteger n)
     where epoch_ = assert (epoch < 2^64) epoch
