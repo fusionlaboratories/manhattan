@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns      #-}
+
 module Utils ( epochFromSlot
              , firstSlotFromEpoch
              , getCommitteeCountPerSlot
@@ -7,8 +9,6 @@ module Utils ( epochFromSlot
              , computeShuffledIndex
              , isActiveValidator
              , getActiveValidatorIndices
-             , serializeInteger
-             , unserializeByteString
              , computeProposerIndex
             --  , mySR
             --  , mySRB
@@ -23,7 +23,8 @@ import qualified Data.ByteString as BS ( index, cons, empty, unpack, length, tak
 import Control.Exception ( assert )
 import Data.Word ( Word8 )
 import Data.Bits ( testBit, shiftR )
-import System.IO.Unsafe ( unsafePerformIO )
+import Serialize
+import Debug.Trace ( trace )
 
 -- | Compute the Epoch a slot lived in
 epochFromSlot :: Slot -> Epoch
@@ -60,7 +61,7 @@ getSeed state epoch domain =
     -- in hash $ (serializeInteger (domainTypeValues domain) 4) `BS.append` (serializeInteger epoch 8) `BS.append` mix
     -- CRAZY (I don't get it) weird big vs littel andian manipulations (based on Tobia's data!)
     let mix = getRandaoMix state (epoch + epochsPerHistoricalVector - minSeedLookAhead - 1)
-        preimage = (domainTypeValues domain) `BS.append` (serializeInteger epoch 8) `BS.append` mix
+        preimage = (domainTypeValues domain) `BS.append` (serializeInteger 8 epoch) `BS.append` mix
     in hash preimage
               
 
@@ -73,43 +74,21 @@ getRandaoMix state epoch = let n = epoch_ `mod` epochsPerHistoricalVector
     where epoch_ = assert (epoch < 2^64) epoch
           mixes = assert (toInteger (length (randaoMixes state)) == epochsPerHistoricalVector) (randaoMixes state)
 
--- | Serialize an integer into a ByteString (little Endian), with optional padding to get the number of bytes
-serializeInteger :: Integer -> Int -> ByteString
-serializeInteger i n = let str = serializeInteger' i
-                           len = BS.length str
-                           diff = assert (len <= n) (n - len)
-                       in BS.append str $ BS.replicate diff 0x00
-
-serializeInteger' :: Integer -> ByteString
-serializeInteger' 0 = BS.empty
-serializeInteger' i | i < 0     = error $ "Serialize is only supported for positive numbers, " ++ show i ++ " is not."
-                   | otherwise = ((fromInteger i) :: Word8) `BS.cons` serializeInteger' (i `div` 256) -- 256 = 2^8
-
-unserializeByteString :: ByteString -> Integer
-unserializeByteString bs = let powers = take (BS.length bs) [2^n | n <- [0,8..]]
-                               ints = map toInteger (BS.unpack bs)
-                               sums = zipWith (*) powers ints
-                           in foldl (+) 0 sums
-
 -- | Return the shuffled index corresponding to seed and indexCount
 -- NOTE: this function was tested against test data gathered by Tobias and it returned the right answer.
 -- So I think this implementation is good and should not move: error is elsewhere.
 computeShuffledIndex :: Integer -> Int -> ByteString -> Integer
-computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
+computeShuffledIndex = trace ("\t\t\tShuffling: " ++ (show shuffleRoundCount) ++ " times") (swapOrNotRound 0 shuffleRoundCount)
+-- computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
     where swapOrNotRound :: Integer -> Integer -> Integer -> Int -> ByteString -> Integer
           swapOrNotRound _ 0 index _ _ = index
-          swapOrNotRound currentRound remainingRounds index indexCount_ seed =
+          swapOrNotRound !currentRound !remainingRounds !index !indexCount_ !seed =
             let indexCount = assert (index < (toInteger indexCount_)) (toInteger indexCount_)
-                -- QUESTION: is this `BS.take 8` or `BS.takeEnd 8` ?
-                pivot = unserializeByteString(BS.take 8 (hash (seed `BS.append` (serializeInteger currentRound 1)))) `mod` indexCount
+                pivot = unserializeByteString(BS.take 8 (hash (seed `BS.append` (serializeInteger 1 currentRound)))) `mod` indexCount
                 flipP = (pivot + indexCount - index) `mod` indexCount
                 position = max index flipP
-                -- source = hash $ serializeInteger $ (unserializeByteString seed) + currentRound + (position `div` 256)
-                -- posAsBytes = BS.append (BS.pack [0x00, 0x00]) (serializeInteger (position `div` 256) 4)
-                posAsBytes = serializeInteger (position `div` 256) 4
-                -- source = hash $ BS.append seed (BS.append (serializeInteger currentRound 1) posAsBytes)
-                source = hash (seed `BS.append` (serializeInteger currentRound 1) `BS.append` posAsBytes)
-                -- 'source' is a string of bytes, do we take from the end of 'source' (BS.reverse)?
+                posAsBytes = serializeInteger 4 (position `div` 256)
+                source = hash (seed `BS.append` (serializeInteger 1 currentRound) `BS.append` posAsBytes)
                 byte = BS.index source (fromInteger ((position `mod` 256) `div` 8))
                 newIndex = if (testBit byte (fromInteger (position `mod` 8))) then flipP else index
             in swapOrNotRound (currentRound+1) (remainingRounds-1) newIndex indexCount_ seed
@@ -124,8 +103,8 @@ getActiveValidatorIndices :: LightState -> Epoch -> [ValidatorIndex]
 getActiveValidatorIndices state epoch = reverse $ filterByValidity epoch (validators state) [] 0
     where filterByValidity :: Epoch -> [Validator] -> [ValidatorIndex] -> ValidatorIndex -> [ValidatorIndex]
           filterByValidity _ [] is _ = is
-          filterByValidity epoch_ (v:vs) is i | isActiveValidator v epoch_ = filterByValidity epoch_ vs (i:is) (i+1)
-                                              | otherwise                  = filterByValidity epoch_ vs is (i+1)
+          filterByValidity epoch_ (v:vs) is !i | isActiveValidator v epoch_ = filterByValidity epoch_ vs (i:is) (i+1)
+                                               | otherwise                  = filterByValidity epoch_ vs is (i+1)
 
 -- | Compute the proposer index from the list of active validators, sampled by the effective balance
 computeProposerIndex :: LightState -> [ValidatorIndex] -> ByteString -> ValidatorIndex
@@ -137,7 +116,7 @@ computeProposerIndex state indices seed =
     where go :: LightState -> [ValidatorIndex] -> Int -> ByteString -> Integer -> Integer -> ValidatorIndex
           go state indices total seed maxRandomByte i =
             let candidateIndex = indices !! fromInteger ((computeShuffledIndex (i `mod` (toInteger total)) total seed))
-                randomByte = BS.index (hash (seed `BS.append` (serializeInteger (i `div` 32) 8))) (fromInteger $ i `mod` 32)
+                randomByte = BS.index (hash (seed `BS.append` (serializeInteger 8 (i `div` 32)))) (fromInteger $ i `mod` 32)
                 effectiveBal = effectiveBalance $ (validators state) !! (fromInteger candidateIndex)
             in if (effectiveBal * maxRandomByte >= maxEffectiveBalance * (toInteger randomByte))
                 then candidateIndex

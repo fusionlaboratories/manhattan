@@ -26,7 +26,9 @@ import Control.Exception as E
 import Network.HTTP.Client ( HttpException(..), HttpExceptionContent(..) )
 import Data.Ix ( range )
 import Data.Time.Clock ( getCurrentTime, diffUTCTime )
+import Serialize
 import System.IO ( hFlush, stdout )
+import Control.Concurrent ( threadDelay )
 
 apiTokenFile :: FilePath
 apiTokenFile = "api-token.json"
@@ -42,7 +44,7 @@ instance FromJSON APIToken where
     <$> v .: "endpoint"
     <*> v .: "token"
 
-{-
+--{-
 main :: IO ()
 main = do
   putStrLn ""
@@ -74,7 +76,7 @@ main = do
       initialState = LightState
         { currSlot = startingSlot
         , validators = validators
-        , randaoMixes = take (fromInteger n) (repeat 0) ++ (initialRandao : take (fromInteger (epochsPerHistoricalVector - n - 1)) (repeat 0))
+        , randaoMixes = take (fromInteger n) (repeat BS.empty) ++ (initialRandao : take (fromInteger (epochsPerHistoricalVector - n - 1)) (repeat BS.empty))
         }
       -- committee = getBeaconCommittee initialState startingSlot 0
   -- print committee
@@ -83,31 +85,45 @@ main = do
   -- cm <- fetchCommitteesAtSlot apiToken startingSlot
   -- print (length cm)
   -- print (length (head cm))
--}
+---}
 -- | Recursively run elections from the starting epoch up to the catching up epoch
 runElections :: APIToken -> LightState -> Epoch -> Epoch -> IO ()
 runElections apiToken state epoch endEpoch = do
   putStrLn $ "Election for Epoch " ++ (show epoch) ++ "/" ++ (show endEpoch) ++ " (" ++ show (endEpoch - epoch) ++ " remaining to catchup)"
   -- Compute the fist slot of the epoch
   let slot = firstSlotFromEpoch epoch
-  putStr ("\tFetching committees from chain...") >> hFlush stdout
+  -- putStr ("\tFetching committees from chain...") >> hFlush stdout
+  putStr ("\tFetching committees from file...") >> hFlush stdout
   tic1 <- getCurrentTime
   -- Fetch all committes for all slots in this epoch
-  !allCommittees <- fetchCommitteesAtSlot apiToken slot
+  -- allCommittees <- fetchCommitteesAtSlot apiToken slot
+  !allCommittees <- fetchCommitteesFromFile "./data/committee_call_ex_1.json"
   toc1 <- getCurrentTime
   let diff1 = diffUTCTime toc1 tic1
   putStrLn $ "(" ++ (show diff1) ++ ")"
-  let committeesPerSlot = getCommitteeCountPerSlot state epoch
-      count = committeesPerSlot * slotsPerEpoch
-      pairs = [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
-  putStr ("\tComputting all " ++ (show count) ++ " committees for this epoch...") >> hFlush stdout
+
+  putStr ("\tComputing list of active validators for epoch " ++ show epoch ++ "...") >> hFlush stdout
   tic2 <- getCurrentTime
-  let !computedCommittees = concat $ map (\(slot, index) -> getBeaconCommittee state slot index) (take 20 pairs)
-      !l = length computedCommittees
+  let !activeIndices = getActiveValidatorIndices state epoch
+      len = toInteger (length activeIndices)
   toc2 <- getCurrentTime
   let diff2 = diffUTCTime toc2 tic2
   putStrLn $ "(" ++ (show diff2) ++ ")"
-  putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat (take 20 allCommittees))
+
+  let committeesPerSlot = getCommitteeCountPerSlot state epoch
+      count = committeesPerSlot * slotsPerEpoch
+      pairs = [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
+  putStrLn ("\tComputting all " ++ (show count) ++ " committees for this epoch...")
+  tic3 <- getCurrentTime
+  -- let computedCommittees = concat $ map (\(slot, index) -> getBeaconCommittee state activeIndices slot index) (take 10 pairs)
+  let computedCommittees = concat $ map (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs
+  toc3 <- getCurrentTime
+  let diff3 = diffUTCTime toc3 tic3
+  putStrLn $ "(" ++ (show diff3) ++ ")"
+
+  putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat allCommittees)
+  -- putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat (take 10 allCommittees))
+  putStrLn $ "Sum (just for eval): " ++ show (sum computedCommittees)
   -- error ""
 
 
@@ -143,11 +159,26 @@ fetchCommitteesAtSlot apiToken slot = do
     fetchCommitteesAtSlot' apiToken slot_ = do
       r <- asJSON =<< get (qnQuery apiToken ("/eth/v1/beacon/states/" ++ show slot_ ++ "/committees"))
       return (r ^. responseBody)
+    handler err@(HttpExceptionRequest _ ResponseTimeout) = do
+            putStrLn "QuickNode API request timed out, retrying in 10 s..."
+            threadDelay (10 * 1000000)
+            fetchCommitteesAtSlot' apiToken slot
+    handler err@(HttpExceptionRequest _ ConnectionTimeout) = do
+            putStrLn "QuickNode APIconnection timed out, retrying in 60 s..."
+            threadDelay (60 * 1000000)
+            fetchCommitteesAtSlot' apiToken slot
     handler err@(HttpExceptionRequest _ _) = do
-      putStrLn $ ">>> Failed to fetch committees at slot " ++ show slot ++ " from QuickNode. <<<"
-      throwIO err
+            putStrLn $ ">>> Failed to fetch committees at slot " ++ show slot ++ " from QuickNode. <<<"
+            throwIO err
 
---{-
+-- | Function used for quicker prototyping: get a set of committees for a given slot from a file
+-- instead of making a API call
+fetchCommitteesFromFile :: FilePath -> IO [[ValidatorIndex]]
+fetchCommitteesFromFile file = do
+  cData <- fromJust <$> decodeFileStrict file
+  return (map cdeValidators (cmData cData))
+
+{-
 
 main :: IO ()
 main = do

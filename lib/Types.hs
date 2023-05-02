@@ -17,9 +17,10 @@ module Types ( Epoch
 
 -- import Data.Word
 -- import Data.LargeWord
-import Data.ByteString ( ByteString )
+import Data.ByteString as BS ( ByteString, reverse )
 import GHC.Generics
 import Data.Aeson
+import Serialize
 
 -- NOTE: as a first pass, I'm making everything the same type (Integer and ByteString mostly) as I don't have to deal with
 -- type conversion. I'm making manual range checks with asserts
@@ -118,7 +119,7 @@ data DomainType = DOMAIN_BEACON_PROPOSER
 -- That's what is returned by eth-v1-beacon-states-{state_id}-committees endpoint
 data CommitteeData = CommitteeData
     { execOptimistic :: Bool
-    , cmData         :: [CommitteeDataEntry]
+    , cmData         :: {-# UNPACK #-} ![CommitteeDataEntry]
     } deriving (Generic, Show)
 
 instance FromJSON CommitteeData where
@@ -128,9 +129,9 @@ instance FromJSON CommitteeData where
 
 
 data CommitteeDataEntry = CommitteeDataEntry
-    { cdeIndex :: CommitteeIndex
-    , cdeSlot  :: Slot
-    , cdeValidators :: [ValidatorIndex]
+    { cdeIndex :: {-# UNPACK #-} !CommitteeIndex
+    , cdeSlot  :: {-# UNPACK #-} !Slot
+    , cdeValidators :: {-# UNPACK #-} ![ValidatorIndex]
     } deriving (Generic, Show)
 
 instance FromJSON CommitteeDataEntry where
@@ -142,7 +143,7 @@ instance FromJSON CommitteeDataEntry where
 -- | Stripped-down version of a Block on the ethereum chain, including only what's needed in here
 data LightBlock = LightBlock
     { bNumber :: Integer
-    , prevRandao :: Integer
+    , prevRandao :: ByteString
     , proposerIndex :: Integer
     } deriving (Generic, Show)
 
@@ -154,5 +155,6 @@ instance FromJSON LightBlock where
         payload <- body .: "execution_payload"
         LightBlock
             <$> fmap read (payload .: "block_number")
-            <*> fmap read (payload .: "prev_randao")
+            <*> (BS.reverse <$> fmap (serializeInteger 32) (read <$> (payload .: "prev_randao")))
+            -- <*> fmap (reverse (serializeInteger (read <$> (payload .: "prev_randao")) 32))
             <*> fmap read (msg .: "proposer_index")
