@@ -77,6 +77,7 @@ library
                     , bytestring
                     , data-serializer
                     , aeson
+                    , vector
 
     -- Directories containing source files.
     hs-source-dirs:   lib
@@ -108,6 +109,7 @@ executable manhattan
         , lens-aeson
         , http-client
         , time
+        , vector
 
     -- Directories containing source files.
     hs-source-dirs:   app

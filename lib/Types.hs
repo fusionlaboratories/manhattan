@@ -21,6 +21,8 @@ import Data.ByteString as BS ( ByteString, reverse )
 import GHC.Generics
 import Data.Aeson
 import Serialize
+import Data.Vector ( Vector )
+import qualified Data.Vector as V
 
 -- NOTE: as a first pass, I'm making everything the same type (Integer and ByteString mostly) as I don't have to deal with
 -- type conversion. I'm making manual range checks with asserts
@@ -67,9 +69,10 @@ type Message = ByteString
 -- | Represents part of the Beacon Chain State, only what we actually need
 data LightState = LightState
     { currSlot         :: Slot
-    , validators :: [Validator]
-    -- , randaoMixes      :: [Integer] -- epochsPerHistoricalVector elements
-    , randaoMixes      :: [ByteString] -- epochsPerHistoricalVector elements
+    -- , validators :: [Validator]
+    , validators :: Vector Validator
+    -- , randaoMixes      :: [ByteString] -- epochsPerHistoricalVector elements
+    , randaoMixes      :: Vector ByteString -- epochsPerHistoricalVector elements
     }
 
 data Validator = Validator
@@ -92,7 +95,8 @@ instance FromJSON Validator where
 -- That's what returned by eth-v1-beacon-states-{state_id}-validators enpoint
 data ValidatorsData = ValidatorsData
     { vdExecOptimistic :: Bool
-    , vdData           :: [Validator]
+    -- , vdData           :: [Validator]
+    , vdData           :: Vector Validator
     } deriving (Show, Eq, Generic)
 
 instance FromJSON ValidatorsData where
@@ -131,14 +135,17 @@ instance FromJSON CommitteeData where
 data CommitteeDataEntry = CommitteeDataEntry
     { cdeIndex :: {-# UNPACK #-} !CommitteeIndex
     , cdeSlot  :: {-# UNPACK #-} !Slot
-    , cdeValidators :: {-# UNPACK #-} ![ValidatorIndex]
+    -- , cdeValidators :: {-# UNPACK #-} ![ValidatorIndex]
+    , cdeValidators :: {-# UNPACK #-} !(Vector ValidatorIndex)
     } deriving (Generic, Show)
 
 instance FromJSON CommitteeDataEntry where
     parseJSON = withObject "CommitteeDataEntry" $ \v -> CommitteeDataEntry
         <$> fmap read (v .: "index")
         <*> fmap read (v .: "slot")
-        <*> fmap (map read) (v .: "validators")
+        -- <*> fmap (map read) (v .: "validators")
+        <*> fmap V.fromList (fmap (map read) (v .: "validators"))
+        -- <*> fmap (V.fromList . read) (v .: "validators")
 
 -- | Stripped-down version of a Block on the ethereum chain, including only what's needed in here
 data LightBlock = LightBlock

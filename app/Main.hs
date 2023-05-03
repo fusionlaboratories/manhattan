@@ -29,6 +29,8 @@ import Data.Time.Clock ( getCurrentTime, diffUTCTime )
 import Serialize
 import System.IO ( hFlush, stdout )
 import Control.Concurrent ( threadDelay )
+import Data.Vector ( Vector )
+import qualified Data.Vector as V
 
 apiTokenFile :: FilePath
 apiTokenFile = "api-token.json"
@@ -76,7 +78,8 @@ main = do
       initialState = LightState
         { currSlot = startingSlot
         , validators = validators
-        , randaoMixes = take (fromInteger n) (repeat BS.empty) ++ (initialRandao : take (fromInteger (epochsPerHistoricalVector - n - 1)) (repeat BS.empty))
+        -- , randaoMixes = take (fromInteger n) (repeat BS.empty) ++ (initialRandao : take (fromInteger (epochsPerHistoricalVector - n - 1)) (repeat BS.empty))
+        , randaoMixes = (V.replicate (fromInteger n) BS.empty) V.++ (initialRandao `V.cons` (V.replicate (fromInteger (epochsPerHistoricalVector - n - 1)) BS.empty))
         }
       -- committee = getBeaconCommittee initialState startingSlot 0
   -- print committee
@@ -105,25 +108,27 @@ runElections apiToken state epoch endEpoch = do
   putStr ("\tComputing list of active validators for epoch " ++ show epoch ++ "...") >> hFlush stdout
   tic2 <- getCurrentTime
   let !activeIndices = getActiveValidatorIndices state epoch
-      len = toInteger (length activeIndices)
+      !len = toInteger (length activeIndices)
   toc2 <- getCurrentTime
   let diff2 = diffUTCTime toc2 tic2
   putStrLn $ "(" ++ (show diff2) ++ ")"
 
   let committeesPerSlot = getCommitteeCountPerSlot state epoch
       count = committeesPerSlot * slotsPerEpoch
-      pairs = [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
+      pairs = V.fromList [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
   putStrLn ("\tComputting all " ++ (show count) ++ " committees for this epoch...")
   tic3 <- getCurrentTime
   -- let computedCommittees = concat $ map (\(slot, index) -> getBeaconCommittee state activeIndices slot index) (take 10 pairs)
-  let computedCommittees = concat $ map (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs
+  let computedCommittees = V.concatMap (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs
+      !indexSum = sum computedCommittees
   toc3 <- getCurrentTime
-  let diff3 = diffUTCTime toc3 tic3
-  putStrLn $ "(" ++ (show diff3) ++ ")"
+  let !diff3 = diffUTCTime toc3 tic3
+  putStrLn $ "\tComputation done in " ++ (show diff3)
 
-  putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat allCommittees)
+  putStrLn $ "\tElection passed: " ++ show (computedCommittees == V.concatMap id allCommittees)
   -- putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat (take 10 allCommittees))
-  putStrLn $ "Sum (just for eval): " ++ show (sum computedCommittees)
+  -- putStrLn $ "\tTotal number of validators: " ++ show (V.length (V.concatMap id allCommittees))
+  putStrLn $ "\tSum (just for eval): " ++ show indexSum
   -- error ""
 
 
@@ -149,11 +154,12 @@ fetchNextBlockFromSlot apiToken slot = fetchBlockAtSlot apiToken slot `E.catch` 
 
 -- | Query the chain for all committees in all slots in the epoch whose slots belongs to
 -- Then, for the sake of simplicity, concatenate all indexes into a big list
-fetchCommitteesAtSlot :: APIToken -> Slot -> IO [[ValidatorIndex]]
+-- fetchCommitteesAtSlot :: APIToken -> Slot -> IO [[ValidatorIndex]]
+fetchCommitteesAtSlot :: APIToken -> Slot -> IO (Vector (Vector ValidatorIndex))
 fetchCommitteesAtSlot apiToken slot = do
   cData <- fetchCommitteesAtSlot' apiToken slot `E.catch` handler
   -- return (concat $ map cdeValidators (cmData cData))
-  return (map cdeValidators (cmData cData))
+  return $ V.fromList (map cdeValidators (cmData cData))
   where
     fetchCommitteesAtSlot' :: APIToken -> Slot -> IO CommitteeData
     fetchCommitteesAtSlot' apiToken slot_ = do
@@ -173,10 +179,11 @@ fetchCommitteesAtSlot apiToken slot = do
 
 -- | Function used for quicker prototyping: get a set of committees for a given slot from a file
 -- instead of making a API call
-fetchCommitteesFromFile :: FilePath -> IO [[ValidatorIndex]]
+-- fetchCommitteesFromFile :: FilePath -> IO [[ValidatorIndex]]
+fetchCommitteesFromFile :: FilePath -> IO (Vector (Vector ValidatorIndex))
 fetchCommitteesFromFile file = do
   cData <- fromJust <$> decodeFileStrict file
-  return (map cdeValidators (cmData cData))
+  return $ V.fromList (map cdeValidators (cmData cData))
 
 {-
 

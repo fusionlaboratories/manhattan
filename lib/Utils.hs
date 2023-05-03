@@ -9,7 +9,7 @@ module Utils ( epochFromSlot
              , computeShuffledIndex
              , isActiveValidator
              , getActiveValidatorIndices
-             , computeProposerIndex
+            --  , computeProposerIndex
             --  , mySR
             --  , mySRB
              ) where
@@ -25,6 +25,8 @@ import Data.Word ( Word8 )
 import Data.Bits ( testBit, shiftR )
 import Serialize
 import Debug.Trace ( trace )
+import Data.Vector ( Vector )
+import qualified Data.Vector as V
 
 -- | Compute the Epoch a slot lived in
 epochFromSlot :: Slot -> Epoch
@@ -70,20 +72,20 @@ getSeed state epoch domain =
 -- getRandaoMix :: LightState -> Epoch -> Integer
 getRandaoMix :: LightState -> Epoch -> ByteString
 getRandaoMix state epoch = let n = epoch_ `mod` epochsPerHistoricalVector
-                           in mixes !! (fromInteger n)
+                           in mixes V.! (fromInteger n)
     where epoch_ = assert (epoch < 2^64) epoch
           mixes = assert (toInteger (length (randaoMixes state)) == epochsPerHistoricalVector) (randaoMixes state)
 
 -- | Return the shuffled index corresponding to seed and indexCount
 -- NOTE: this function was tested against test data gathered by Tobias and it returned the right answer.
 -- So I think this implementation is good and should not move: error is elsewhere.
-computeShuffledIndex :: Integer -> Int -> ByteString -> Integer
+computeShuffledIndex :: Integer -> Integer -> ByteString -> Integer
 computeShuffledIndex = trace ("\t\t\tShuffling: " ++ (show shuffleRoundCount) ++ " times") (swapOrNotRound 0 shuffleRoundCount)
 -- computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
-    where swapOrNotRound :: Integer -> Integer -> Integer -> Int -> ByteString -> Integer
+    where swapOrNotRound :: Integer -> Integer -> Integer -> Integer -> ByteString -> Integer
           swapOrNotRound _ 0 index _ _ = index
           swapOrNotRound !currentRound !remainingRounds !index !indexCount_ !seed =
-            let indexCount = assert (index < (toInteger indexCount_)) (toInteger indexCount_)
+            let indexCount = assert (index < indexCount_) indexCount_
                 pivot = unserializeByteString(BS.take 8 (hash (seed `BS.append` (serializeInteger 1 currentRound)))) `mod` indexCount
                 flipP = (pivot + indexCount - index) `mod` indexCount
                 position = max index flipP
@@ -99,25 +101,31 @@ isActiveValidator validator epoch =
     activationEpoch validator <= epoch && epoch < exitEpoch validator
 
 -- | Returns the list of active validators (their indices) for the given epoch
-getActiveValidatorIndices :: LightState -> Epoch -> [ValidatorIndex]
-getActiveValidatorIndices state epoch = reverse $ filterByValidity epoch (validators state) [] 0
-    where filterByValidity :: Epoch -> [Validator] -> [ValidatorIndex] -> ValidatorIndex -> [ValidatorIndex]
-          filterByValidity _ [] is _ = is
-          filterByValidity epoch_ (v:vs) is !i | isActiveValidator v epoch_ = filterByValidity epoch_ vs (i:is) (i+1)
-                                               | otherwise                  = filterByValidity epoch_ vs is (i+1)
+-- getActiveValidatorIndices :: LightState -> Epoch -> [ValidatorIndex]
+getActiveValidatorIndices :: LightState -> Epoch -> Vector ValidatorIndex
+getActiveValidatorIndices state epoch = flip V.imapMaybe (validators state) $ \i v ->
+    if (isActiveValidator v epoch) then Just (toInteger i) else Nothing
+-- getActiveValidatorIndices state epoch = V.fromList $ reverse $ filterByValidity epoch (validators state) [] 0
+--     where filterByValidity :: Epoch -> [Validator] -> [ValidatorIndex] -> ValidatorIndex -> [ValidatorIndex]
+--           filterByValidity _ [] is _ = is
+--           filterByValidity epoch_ (v:vs) is !i | isActiveValidator v epoch_ = filterByValidity epoch_ vs (i:is) (i+1)
+--                                                | otherwise                  = filterByValidity epoch_ vs is (i+1)
+
+
+
 
 -- | Compute the proposer index from the list of active validators, sampled by the effective balance
-computeProposerIndex :: LightState -> [ValidatorIndex] -> ByteString -> ValidatorIndex
-computeProposerIndex _ [] _ = error "Can't chose a proposer index from empty list!"
-computeProposerIndex state indices seed =
-    let maxRandomByte = 2^8 - 1
-        total = length indices
-    in go state indices total seed maxRandomByte 0
-    where go :: LightState -> [ValidatorIndex] -> Int -> ByteString -> Integer -> Integer -> ValidatorIndex
-          go state indices total seed maxRandomByte i =
-            let candidateIndex = indices !! fromInteger ((computeShuffledIndex (i `mod` (toInteger total)) total seed))
-                randomByte = BS.index (hash (seed `BS.append` (serializeInteger 8 (i `div` 32)))) (fromInteger $ i `mod` 32)
-                effectiveBal = effectiveBalance $ (validators state) !! (fromInteger candidateIndex)
-            in if (effectiveBal * maxRandomByte >= maxEffectiveBalance * (toInteger randomByte))
-                then candidateIndex
-                else go state indices total seed maxRandomByte (i+1)
+-- computeProposerIndex :: LightState -> [ValidatorIndex] -> ByteString -> ValidatorIndex
+-- computeProposerIndex _ [] _ = error "Can't chose a proposer index from empty list!"
+-- computeProposerIndex state indices seed =
+--     let maxRandomByte = 2^8 - 1
+--         total = length indices
+--     in go state indices total seed maxRandomByte 0
+--     where go :: LightState -> [ValidatorIndex] -> Int -> ByteString -> Integer -> Integer -> ValidatorIndex
+--           go state indices total seed maxRandomByte i =
+--             let candidateIndex = indices !! fromInteger ((computeShuffledIndex (i `mod` (toInteger total)) total seed))
+--                 randomByte = BS.index (hash (seed `BS.append` (serializeInteger 8 (i `div` 32)))) (fromInteger $ i `mod` 32)
+--                 effectiveBal = effectiveBalance $ (validators state) !! (fromInteger candidateIndex)
+--             in if (effectiveBal * maxRandomByte >= maxEffectiveBalance * (toInteger randomByte))
+--                 then candidateIndex
+--                 else go state indices total seed maxRandomByte (i+1)
