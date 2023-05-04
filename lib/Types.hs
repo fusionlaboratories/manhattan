@@ -20,7 +20,7 @@ import Data.Word ( Word64 )
 import Data.ByteString as BS ( ByteString, reverse )
 import GHC.Generics
 import Data.Aeson
-import Serialize
+import Serialize ( serializeInteger )
 import Data.Vector ( Vector )
 import qualified Data.Vector as V
 
@@ -54,7 +54,7 @@ type BLSSignature = Integer
 
 -- data BLSPubKey
 -- type BLSPubKey = Word48
-type BLSPubKey = Word64
+type BLSPubKey = Integer
 
 -- data BLSPrivKey
 
@@ -73,7 +73,7 @@ data Validator = Validator
     { pubKey           :: BLSPubKey
     , activationEpoch  :: Epoch
     , exitEpoch        :: Epoch
-    , effectiveBalance :: Integer -- Needed for computing proposer index
+    , effectiveBalance :: Word64 -- Needed for computing proposer index
     } deriving (Eq, Show, Generic)
 
 instance FromJSON Validator where

@@ -26,7 +26,6 @@ import Control.Exception as E
 import Network.HTTP.Client ( HttpException(..), HttpExceptionContent(..) )
 import Data.Ix ( range )
 import Data.Time.Clock ( getCurrentTime, diffUTCTime )
-import Serialize
 import System.IO ( hFlush, stdout )
 import Control.Concurrent ( threadDelay )
 import Data.Vector ( Vector )
@@ -127,9 +126,11 @@ runElections apiToken state epoch endEpoch = do
   putStrLn $ "\tComputation done in " ++ (show diff3)
 
   putStrLn $ "\tElection passed: " ++ show (computedCommittees == V.concatMap id allCommittees)
+  -- putStrLn $ "\tcomputed: " ++ show (V.take 10 computedCommittees)
+  -- putStrLn $ "\tAll:      " ++ show (V.take 10 (V.concatMap id allCommittees))
   -- putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat (take 10 allCommittees))
   -- putStrLn $ "\tTotal number of validators: " ++ show (V.length (V.concatMap id allCommittees))
-  putStrLn $ "\tSum (just for eval): " ++ show indexSum
+  -- putStrLn $ "\tSum (just for eval): " ++ show indexSum
   -- error ""
 
 
