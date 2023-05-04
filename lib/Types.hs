@@ -15,7 +15,7 @@ module Types ( Epoch
              , LightBlock(..)
              ) where
 
--- import Data.Word
+import Data.Word ( Word64 )
 -- import Data.LargeWord
 import Data.ByteString as BS ( ByteString, reverse )
 import GHC.Generics
@@ -30,27 +30,23 @@ import qualified Data.Vector as V
 -- I'll switch to proper types with constructors, etc. later.
 
 -- | Epoch number are positive and always increasing
--- type Epoch = Word64
-type Epoch = Integer
+type Epoch = Word64
 
 -- | The block height is the block number, positive and always increasing
-type BlockHeight = Integer
+type BlockHeight = Word64
 
 -- | Slot number are positive and always increasing. A slot number gives the epoch in which it lived
--- type Slot = Word64
-type Slot = Integer
+type Slot = Word64
 
 -- type Word48 = LargeKey Word16 Word32
 
 -- | A "validator registry index"
 -- This is the validator's position in the State's list of all validators. This is used in the original impl
 -- because it's lighter to carry around than the full Validator type (do we need this in Haskell thanks to lazyness?)
--- type ValidatorIndex = Word64
-type ValidatorIndex = Integer
+type ValidatorIndex = Word64
 
 -- | A committee index at a slot (where there are several committees for a slot)
--- type CommitteeIndex = Word64
-type CommitteeIndex = Integer
+type CommitteeIndex = Word64
 
 -- data BLSSignature
 -- type BLSSignature = Word96
@@ -58,7 +54,7 @@ type BLSSignature = Integer
 
 -- data BLSPubKey
 -- type BLSPubKey = Word48
-type BLSPubKey = Integer
+type BLSPubKey = Word64
 
 -- data BLSPrivKey
 
@@ -69,9 +65,7 @@ type Message = ByteString
 -- | Represents part of the Beacon Chain State, only what we actually need
 data LightState = LightState
     { currSlot         :: Slot
-    -- , validators :: [Validator]
     , validators :: Vector Validator
-    -- , randaoMixes      :: [ByteString] -- epochsPerHistoricalVector elements
     , randaoMixes      :: Vector ByteString -- epochsPerHistoricalVector elements
     }
 
@@ -95,7 +89,6 @@ instance FromJSON Validator where
 -- That's what returned by eth-v1-beacon-states-{state_id}-validators enpoint
 data ValidatorsData = ValidatorsData
     { vdExecOptimistic :: Bool
-    -- , vdData           :: [Validator]
     , vdData           :: Vector Validator
     } deriving (Show, Eq, Generic)
 
@@ -135,7 +128,6 @@ instance FromJSON CommitteeData where
 data CommitteeDataEntry = CommitteeDataEntry
     { cdeIndex :: {-# UNPACK #-} !CommitteeIndex
     , cdeSlot  :: {-# UNPACK #-} !Slot
-    -- , cdeValidators :: {-# UNPACK #-} ![ValidatorIndex]
     , cdeValidators :: {-# UNPACK #-} !(Vector ValidatorIndex)
     } deriving (Generic, Show)
 
@@ -149,9 +141,9 @@ instance FromJSON CommitteeDataEntry where
 
 -- | Stripped-down version of a Block on the ethereum chain, including only what's needed in here
 data LightBlock = LightBlock
-    { bNumber :: Integer
+    { bNumber :: Word64
     , prevRandao :: ByteString
-    , proposerIndex :: Integer
+    , proposerIndex :: Word64
     } deriving (Generic, Show)
 
 instance FromJSON LightBlock where

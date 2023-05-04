@@ -21,7 +21,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS ( index, cons, empty, unpack, length, takeEnd, reverse, take, append, pack, replicate )
 -- import qualified Data.ByteString.Char8 as B
 import Control.Exception ( assert )
-import Data.Word ( Word8 )
+import Data.Word ( Word8, Word64 )
 import Data.Bits ( testBit, shiftR )
 import Serialize
 import Debug.Trace ( trace )
@@ -37,11 +37,10 @@ firstSlotFromEpoch :: Epoch -> Slot
 firstSlotFromEpoch epoch = epoch * slotsPerEpoch
 
 -- | Return the number of committees in each slot for the given epoch
--- getCommitteeCountPerSlot :: LightState -> Epoch -> Word64
-getCommitteeCountPerSlot :: LightState -> Epoch -> Integer
+getCommitteeCountPerSlot :: LightState -> Epoch -> Word64
 getCommitteeCountPerSlot state epoch = max 1 $ min maxCommitteesPerSlot (l `div` slotsPerEpoch `div` targetCommitteeSize)
     -- where l = (toInteger . length . validatorIndexes) state
-    where l = toInteger (length (getActiveValidatorIndices state epoch))
+    where l = fromIntegral (length (getActiveValidatorIndices state epoch))
 
 -- domainTypeValues :: DomainType -> Word32
 -- domainTypeValues :: DomainType -> Integer
@@ -71,18 +70,17 @@ getSeed state epoch domain =
 -- getRandaoMix :: LightState -> Epoch -> Word256
 -- getRandaoMix :: LightState -> Epoch -> Integer
 getRandaoMix :: LightState -> Epoch -> ByteString
-getRandaoMix state epoch = let n = epoch_ `mod` epochsPerHistoricalVector
-                           in mixes V.! (fromInteger n)
-    where epoch_ = assert (epoch < 2^64) epoch
-          mixes = assert (toInteger (length (randaoMixes state)) == epochsPerHistoricalVector) (randaoMixes state)
+getRandaoMix state epoch = let n = epoch `mod` epochsPerHistoricalVector
+                           in mixes V.! (fromIntegral n)
+    where mixes = randaoMixes state
 
 -- | Return the shuffled index corresponding to seed and indexCount
 -- NOTE: this function was tested against test data gathered by Tobias and it returned the right answer.
 -- So I think this implementation is good and should not move: error is elsewhere.
-computeShuffledIndex :: Integer -> Integer -> ByteString -> Integer
+computeShuffledIndex :: Word64 -> Word64 -> ByteString -> Word64
 computeShuffledIndex = trace ("\t\t\tShuffling: " ++ (show shuffleRoundCount) ++ " times") (swapOrNotRound 0 shuffleRoundCount)
 -- computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
-    where swapOrNotRound :: Integer -> Integer -> Integer -> Integer -> ByteString -> Integer
+    where swapOrNotRound :: Word64 -> Word64 -> Word64 -> Word64 -> ByteString -> Word64
           swapOrNotRound _ 0 index _ _ = index
           swapOrNotRound !currentRound !remainingRounds !index !indexCount_ !seed =
             let indexCount = assert (index < indexCount_) indexCount_
@@ -91,8 +89,8 @@ computeShuffledIndex = trace ("\t\t\tShuffling: " ++ (show shuffleRoundCount) ++
                 position = max index flipP
                 posAsBytes = serializeInteger 4 (position `div` 256)
                 source = hash (seed `BS.append` (serializeInteger 1 currentRound) `BS.append` posAsBytes)
-                byte = BS.index source (fromInteger ((position `mod` 256) `div` 8))
-                newIndex = if (testBit byte (fromInteger (position `mod` 8))) then flipP else index
+                byte = BS.index source (fromIntegral ((position `mod` 256) `div` 8))
+                newIndex = if (testBit byte (fromIntegral (position `mod` 8))) then flipP else index
             in swapOrNotRound (currentRound+1) (remainingRounds-1) newIndex indexCount_ seed
 
 -- | Returns whether a validator is active for the given epoch
@@ -101,10 +99,9 @@ isActiveValidator validator epoch =
     activationEpoch validator <= epoch && epoch < exitEpoch validator
 
 -- | Returns the list of active validators (their indices) for the given epoch
--- getActiveValidatorIndices :: LightState -> Epoch -> [ValidatorIndex]
 getActiveValidatorIndices :: LightState -> Epoch -> Vector ValidatorIndex
 getActiveValidatorIndices state epoch = flip V.imapMaybe (validators state) $ \i v ->
-    if (isActiveValidator v epoch) then Just (toInteger i) else Nothing
+    if (isActiveValidator v epoch) then Just (fromIntegral i) else Nothing
 -- getActiveValidatorIndices state epoch = V.fromList $ reverse $ filterByValidity epoch (validators state) [] 0
 --     where filterByValidity :: Epoch -> [Validator] -> [ValidatorIndex] -> ValidatorIndex -> [ValidatorIndex]
 --           filterByValidity _ [] is _ = is

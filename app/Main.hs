@@ -31,6 +31,7 @@ import System.IO ( hFlush, stdout )
 import Control.Concurrent ( threadDelay )
 import Data.Vector ( Vector )
 import qualified Data.Vector as V
+import Data.Word ( Word64 )
 
 apiTokenFile :: FilePath
 apiTokenFile = "api-token.json"
@@ -79,7 +80,7 @@ main = do
         { currSlot = startingSlot
         , validators = validators
         -- , randaoMixes = take (fromInteger n) (repeat BS.empty) ++ (initialRandao : take (fromInteger (epochsPerHistoricalVector - n - 1)) (repeat BS.empty))
-        , randaoMixes = (V.replicate (fromInteger n) BS.empty) V.++ (initialRandao `V.cons` (V.replicate (fromInteger (epochsPerHistoricalVector - n - 1)) BS.empty))
+        , randaoMixes = (V.replicate (fromIntegral n) BS.empty) V.++ (initialRandao `V.cons` (V.replicate (fromIntegral (epochsPerHistoricalVector - n - 1)) BS.empty))
         }
       -- committee = getBeaconCommittee initialState startingSlot 0
   -- print committee
@@ -108,7 +109,7 @@ runElections apiToken state epoch endEpoch = do
   putStr ("\tComputing list of active validators for epoch " ++ show epoch ++ "...") >> hFlush stdout
   tic2 <- getCurrentTime
   let !activeIndices = getActiveValidatorIndices state epoch
-      !len = toInteger (length activeIndices)
+      !len = fromIntegral (length activeIndices)
   toc2 <- getCurrentTime
   let diff2 = diffUTCTime toc2 tic2
   putStrLn $ "(" ++ (show diff2) ++ ")"

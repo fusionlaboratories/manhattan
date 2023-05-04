@@ -8,37 +8,30 @@ module Config ( slotsPerEpoch
               , maxEffectiveBalance
                ) where
 
--- import Data.Word
+import Data.Word ( Word64 )
 
--- slotsPerEpoch :: Word64
-slotsPerEpoch :: Integer
+slotsPerEpoch :: Word64
 slotsPerEpoch = 32
 
--- maxCommitteesPerSlot :: Word64
-maxCommitteesPerSlot :: Integer
+maxCommitteesPerSlot :: Word64
 maxCommitteesPerSlot = 64 -- 2^6
 
--- targetCommitteeSize :: Word64
-targetCommitteeSize :: Integer
+targetCommitteeSize :: Word64
 targetCommitteeSize = 128 -- 2^7
 
--- maxValidatorsPerCommittee :: Word64
-maxValidatorsPerCommittee :: Integer
+maxValidatorsPerCommittee :: Word64
 maxValidatorsPerCommittee = 2048 -- 2^11
 
--- shuffleRoundCount :: Word64
-shuffleRoundCount :: Integer
+shuffleRoundCount :: Word64
 shuffleRoundCount = 90
 
 -- | Unit: Epochs
--- epochsPerHistoricalVector :: Word64
-epochsPerHistoricalVector :: Integer
+epochsPerHistoricalVector :: Word64
 epochsPerHistoricalVector = 65536 -- 2^16
 
 -- | Unit: Epochs
--- minSeedLookAhead :: Word64
-minSeedLookAhead :: Integer
+minSeedLookAhead :: Word64
 minSeedLookAhead = 1 
 
-maxEffectiveBalance :: Integer
+maxEffectiveBalance :: Word64
 maxEffectiveBalance = 32000000000
