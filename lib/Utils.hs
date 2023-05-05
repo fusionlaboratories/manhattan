@@ -27,6 +27,7 @@ import Serialize ( serializeWord64, unserializeByteStringToWord64 )
 import Debug.Trace ( trace )
 import Data.Vector ( Vector )
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 
 -- | Compute the Epoch a slot lived in
 epochFromSlot :: Slot -> Epoch
@@ -40,7 +41,7 @@ firstSlotFromEpoch epoch = epoch * slotsPerEpoch
 getCommitteeCountPerSlot :: LightState -> Epoch -> Word64
 getCommitteeCountPerSlot state epoch = max 1 $ min maxCommitteesPerSlot (l `div` slotsPerEpoch `div` targetCommitteeSize)
     -- where l = (toInteger . length . validatorIndexes) state
-    where l = fromIntegral (V.length (getActiveValidatorIndices state epoch))
+    where l = fromIntegral (U.length (getActiveValidatorIndices state epoch))
 
 -- domainTypeValues :: DomainType -> Word32
 -- domainTypeValues :: DomainType -> Integer
@@ -78,7 +79,8 @@ getRandaoMix state epoch = let n = epoch `mod` epochsPerHistoricalVector
 -- NOTE: this function was tested against test data gathered by Tobias and it returned the right answer.
 -- So I think this implementation is good and should not move: error is elsewhere.
 computeShuffledIndex :: Word64 -> Word64 -> ByteString -> Word64
-computeShuffledIndex = trace ("\t\t\tShuffling: " ++ show shuffleRoundCount ++ " times") (swapOrNotRound 0 shuffleRoundCount)
+-- computeShuffledIndex i ic s = trace ("\t\t\tShuffling: " ++ show shuffleRoundCount ++ " times") (swapOrNotRound 0 shuffleRoundCount i ic s)
+computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
 -- computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
     where swapOrNotRound :: Word64 -> Word64 -> Word64 -> Word64 -> ByteString -> Word64
           swapOrNotRound _ 0 index _ _ = index
@@ -99,8 +101,8 @@ isActiveValidator validator epoch =
     activationEpoch validator <= epoch && epoch < exitEpoch validator
 
 -- | Returns the list of active validators (their indices) for the given epoch
-getActiveValidatorIndices :: LightState -> Epoch -> Vector ValidatorIndex
-getActiveValidatorIndices state epoch = flip V.imapMaybe (validators state) $ \i v ->
+getActiveValidatorIndices :: LightState -> Epoch -> U.Vector ValidatorIndex
+getActiveValidatorIndices state epoch = U.convert $ flip V.imapMaybe (validators state) $ \i v ->
     if isActiveValidator v epoch then Just (fromIntegral i) else Nothing
 -- getActiveValidatorIndices state epoch = V.fromList $ reverse $ filterByValidity epoch (validators state) [] 0
 --     where filterByValidity :: Epoch -> [Validator] -> [ValidatorIndex] -> ValidatorIndex -> [ValidatorIndex]

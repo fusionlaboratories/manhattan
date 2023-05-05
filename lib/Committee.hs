@@ -14,6 +14,7 @@ import Serialize
 import Debug.Trace ( trace )
 import Data.Vector ( Vector )
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 import Data.Word ( Word64 )
 
 -- | Return the beacon committee at @slot@ for @index@
@@ -32,7 +33,7 @@ import Data.Word ( Word64 )
 -- We pass the list of previously-computed active validators instead of re-computing it
 -- OPTIMIZED VERSION
 -- getBeaconCommittee :: LightState -> [ValidatorIndex] -> Integer -> Slot -> CommitteeIndex -> [ValidatorIndex]
-getBeaconCommittee :: LightState -> Vector ValidatorIndex -> Word64 -> Slot -> CommitteeIndex -> Vector ValidatorIndex
+getBeaconCommittee :: LightState -> U.Vector ValidatorIndex -> Word64 -> Slot -> CommitteeIndex -> U.Vector ValidatorIndex
 getBeaconCommittee state !activeIndices !len slot index =
     let epoch = epochFromSlot slot
         committeesPerSlot = getCommitteeCountPerSlot state epoch
@@ -55,14 +56,14 @@ getBeaconCommittee state !activeIndices !len slot index =
 
 -- | Return the committee corresponding to indices, seed, index, and committee count
 -- OPTIMIZED version 
-computeCommittee :: Vector ValidatorIndex -> ByteString -> Word64 -> Word64 -> Word64 -> Vector ValidatorIndex
+computeCommittee :: U.Vector ValidatorIndex -> ByteString -> Word64 -> Word64 -> Word64 -> U.Vector ValidatorIndex
 computeCommittee indices seed index count len =
     -- let len = trace ("\t\tComputing committee #" ++ (show index)) (length indices)
     let start = trace ("\t\tComputing committee #" ++ (show index)) $ (len * index) `div` count
         end   = (len * (index + 1)) `div` count
     -- in V.fromList [ (fromInteger i) | i <- range (start, end - 1) ]
     -- in V.fromList [ indices V.! (fromInteger i) | i <- range (start, end - 1) ]  -- Careful of the upper bound not included!
-    in V.fromList [ indices V.! fromIntegral ((computeShuffledIndex i len seed)) | i <- range (start, end - 1) ] -- Careful of the upper bound not included!
+    in U.fromList [ indices U.! fromIntegral ((computeShuffledIndex i len seed)) | i <- range (start, end - 1) ] -- Careful of the upper bound not included!
 
 -- | Returns the proposer index at the current slot
 -- Not necessarily needed for the bridge, but this allows to check algorithms is okay

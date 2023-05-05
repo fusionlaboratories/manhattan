@@ -23,6 +23,7 @@ import Data.Aeson
 import Serialize ( serializeInteger )
 import Data.Vector ( Vector )
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 
 -- NOTE: as a first pass, I'm making everything the same type (Integer and ByteString mostly) as I don't have to deal with
 -- type conversion. I'm making manual range checks with asserts
@@ -65,7 +66,7 @@ type Message = ByteString
 -- | Represents part of the Beacon Chain State, only what we actually need
 data LightState = LightState
     { currSlot         :: Slot
-    , validators :: Vector Validator
+    , validators       :: Vector Validator
     , randaoMixes      :: Vector ByteString -- epochsPerHistoricalVector elements
     }
 
@@ -128,7 +129,7 @@ instance FromJSON CommitteeData where
 data CommitteeDataEntry = CommitteeDataEntry
     { cdeIndex :: {-# UNPACK #-} !CommitteeIndex
     , cdeSlot  :: {-# UNPACK #-} !Slot
-    , cdeValidators :: {-# UNPACK #-} !(Vector ValidatorIndex)
+    , cdeValidators :: {-# UNPACK #-} !(U.Vector ValidatorIndex)
     } deriving (Generic, Show)
 
 instance FromJSON CommitteeDataEntry where
@@ -136,7 +137,7 @@ instance FromJSON CommitteeDataEntry where
         <$> fmap read (v .: "index")
         <*> fmap read (v .: "slot")
         -- <*> fmap (map read) (v .: "validators")
-        <*> fmap V.fromList (fmap (map read) (v .: "validators"))
+        <*> fmap U.fromList (fmap (map read) (v .: "validators"))
         -- <*> fmap (V.fromList . read) (v .: "validators")
 
 -- | Stripped-down version of a Block on the ethereum chain, including only what's needed in here
