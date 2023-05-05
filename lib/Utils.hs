@@ -102,7 +102,7 @@ isActiveValidator validator epoch =
 
 -- | Returns the list of active validators (their indices) for the given epoch
 getActiveValidatorIndices :: LightState -> Epoch -> U.Vector ValidatorIndex
-getActiveValidatorIndices state epoch = U.convert $ flip V.imapMaybe (validators state) $ \i v ->
+getActiveValidatorIndices state epoch = flip U.imapMaybe (validators state) $ \i v ->
     if isActiveValidator v epoch then Just (fromIntegral i) else Nothing
 -- getActiveValidatorIndices state epoch = V.fromList $ reverse $ filterByValidity epoch (validators state) [] 0
 --     where filterByValidity :: Epoch -> [Validator] -> [ValidatorIndex] -> ValidatorIndex -> [ValidatorIndex]

@@ -1,5 +1,13 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE FlexibleInstances #-}
+
 
 module Types ( Epoch
              , BlockHeight
@@ -22,8 +30,9 @@ import GHC.Generics
 import Data.Aeson
 import Serialize ( serializeInteger )
 import Data.Vector ( Vector )
-import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
+import qualified Data.Vector.Generic as VG
+import qualified Data.Vector.Generic.Mutable as VGM
 
 -- NOTE: as a first pass, I'm making everything the same type (Integer and ByteString mostly) as I don't have to deal with
 -- type conversion. I'm making manual range checks with asserts
@@ -55,7 +64,7 @@ type BLSSignature = Integer
 
 -- data BLSPubKey
 -- type BLSPubKey = Word48
-type BLSPubKey = Integer
+type BLSPubKey = Word64
 
 -- data BLSPrivKey
 
@@ -66,7 +75,7 @@ type Message = ByteString
 -- | Represents part of the Beacon Chain State, only what we actually need
 data LightState = LightState
     { currSlot         :: Slot
-    , validators       :: Vector Validator
+    , validators       :: U.Vector Validator
     , randaoMixes      :: Vector ByteString -- epochsPerHistoricalVector elements
     }
 
@@ -76,6 +85,13 @@ data Validator = Validator
     , exitEpoch        :: Epoch
     , effectiveBalance :: Word64 -- Needed for computing proposer index
     } deriving (Eq, Show, Generic)
+
+instance U.IsoUnbox Validator (Word64,Word64,Word64,Word64) where
+newtype instance U.MVector s Validator = MV_Validator (U.MVector s (Word64,Word64,Word64,Word64))
+newtype instance U.Vector    Validator = V_Validator  (U.Vector    (Word64,Word64,Word64,Word64))
+deriving via (Validator `U.As` (Word64,Word64,Word64,Word64)) instance VGM.MVector U.MVector Validator
+deriving via (Validator `U.As` (Word64,Word64,Word64,Word64)) instance VG.Vector   U.Vector  Validator
+instance U.Unbox Validator
 
 instance FromJSON Validator where
     parseJSON = withObject "Validator" $ \v -> do
@@ -90,7 +106,7 @@ instance FromJSON Validator where
 -- That's what returned by eth-v1-beacon-states-{state_id}-validators enpoint
 data ValidatorsData = ValidatorsData
     { vdExecOptimistic :: Bool
-    , vdData           :: Vector Validator
+    , vdData           :: U.Vector Validator
     } deriving (Show, Eq, Generic)
 
 instance FromJSON ValidatorsData where
