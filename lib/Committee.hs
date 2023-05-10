@@ -16,6 +16,7 @@ import Data.Vector ( Vector )
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import Data.Word ( Word64 )
+import qualified Data.Vector.Unboxed.Mutable as MV
 
 -- | Return the beacon committee at @slot@ for @index@
 -- ORIGINAL VERSION
@@ -33,15 +34,15 @@ import Data.Word ( Word64 )
 -- We pass the list of previously-computed active validators instead of re-computing it
 -- OPTIMIZED VERSION
 -- getBeaconCommittee :: LightState -> [ValidatorIndex] -> Integer -> Slot -> CommitteeIndex -> [ValidatorIndex]
-getBeaconCommittee :: LightState -> U.Vector ValidatorIndex -> Word64 -> Slot -> CommitteeIndex -> U.Vector ValidatorIndex
-getBeaconCommittee state !activeIndices !len slot index =
+getBeaconCommittee :: LightState -> MV.IOVector ValidatorIndex -> Word64 -> Slot -> CommitteeIndex -> IO (MV.IOVector ValidatorIndex)
+getBeaconCommittee state !activeIndices_ !len slot index = do
     let epoch = epochFromSlot slot
-        committeesPerSlot = getCommitteeCountPerSlot state epoch
-        -- indices = getActiveValidatorIndices state epoch
         seed = getSeed state epoch DOMAIN_BEACON_ATTESTER
-        index_ = (slot `mod` slotsPerEpoch) * committeesPerSlot + index
+    committeesPerSlot <- getCommitteeCountPerSlot state epoch
+    let index_ = (slot `mod` slotsPerEpoch) * committeesPerSlot + index
         count = committeesPerSlot * slotsPerEpoch
-    in computeCommittee activeIndices seed index_ count len
+    activeIndices <- MV.clone activeIndices_
+    computeCommittee activeIndices seed index_ count len
 
 -- | Return the committee corresponding to indices, seed, index, and committee count
 -- ORIGINAL version
@@ -56,14 +57,17 @@ getBeaconCommittee state !activeIndices !len slot index =
 
 -- | Return the committee corresponding to indices, seed, index, and committee count
 -- OPTIMIZED version 
-computeCommittee :: U.Vector ValidatorIndex -> ByteString -> Word64 -> Word64 -> Word64 -> U.Vector ValidatorIndex
-computeCommittee indices seed index count len =
+-- computeCommittee :: U.Vector ValidatorIndex -> ByteString -> Word64 -> Word64 -> Word64 -> U.Vector ValidatorIndex
+computeCommittee :: MV.IOVector ValidatorIndex -> ByteString -> Word64 -> Word64 -> Word64 -> IO (MV.IOVector ValidatorIndex)
+computeCommittee indices seed index count len = do
     -- let len = trace ("\t\tComputing committee #" ++ (show index)) (length indices)
-    let start = trace ("\t\tComputing committee #" ++ (show index)) $ (len * index) `div` count
-        end   = (len * (index + 1)) `div` count
+    let start = trace ("\t\tComputing committee #" ++ (show index)) $ fromIntegral $ (len * index) `div` count
+        end   = fromIntegral $ (len * (index + 1)) `div` count
+    shuffleList indices seed (fromIntegral shuffleRoundCount - 1)
+    return $ MV.slice start (end - 1 - start + 1) indices
     -- in V.fromList [ (fromInteger i) | i <- range (start, end - 1) ]
     -- in V.fromList [ indices V.! (fromInteger i) | i <- range (start, end - 1) ]  -- Careful of the upper bound not included!
-    in U.fromList [ indices U.! fromIntegral ((computeShuffledIndex i len seed)) | i <- range (start, end - 1) ] -- Careful of the upper bound not included!
+    -- in U.fromList [ indices U.! fromIntegral ((computeShuffledIndex i len seed)) | i <- range (start, end - 1) ] -- Careful of the upper bound not included!
 
 -- | Returns the proposer index at the current slot
 -- Not necessarily needed for the bridge, but this allows to check algorithms is okay

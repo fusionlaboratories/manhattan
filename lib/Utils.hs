@@ -9,6 +9,7 @@ module Utils ( epochFromSlot
              , computeShuffledIndex
              , isActiveValidator
              , getActiveValidatorIndices
+             , shuffleList
             --  , computeProposerIndex
             --  , mySR
             --  , mySRB
@@ -18,16 +19,18 @@ import Types
 import Config
 import Crypto.Hash.SHA256 ( hash )
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS ( index, take, append, pack )
+import qualified Data.ByteString as BS ( index, take, append, pack, empty )
 -- import qualified Data.ByteString.Char8 as B
 import Control.Exception ( assert )
 import Data.Word ( Word64 )
-import Data.Bits ( testBit )
+import Data.Bits ( testBit, (.&.), shiftR )
 import Serialize ( serializeWord64, unserializeByteStringToWord64 )
 import Debug.Trace ( trace )
 import Data.Vector ( Vector )
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
+import qualified Data.Vector.Unboxed.Mutable as MV
+import Control.Monad (when)
 
 -- | Compute the Epoch a slot lived in
 epochFromSlot :: Slot -> Epoch
@@ -38,10 +41,15 @@ firstSlotFromEpoch :: Epoch -> Slot
 firstSlotFromEpoch epoch = epoch * slotsPerEpoch
 
 -- | Return the number of committees in each slot for the given epoch
-getCommitteeCountPerSlot :: LightState -> Epoch -> Word64
-getCommitteeCountPerSlot state epoch = max 1 $ min maxCommitteesPerSlot (l `div` slotsPerEpoch `div` targetCommitteeSize)
-    -- where l = (toInteger . length . validatorIndexes) state
-    where l = fromIntegral (U.length (getActiveValidatorIndices state epoch))
+getCommitteeCountPerSlot :: LightState -> Epoch -> IO Word64
+getCommitteeCountPerSlot state epoch = do
+    l <- (fromIntegral . MV.length) <$> getActiveValidatorIndices state epoch
+    return $ max 1 $ min maxCommitteesPerSlot (l `div` slotsPerEpoch `div` targetCommitteeSize)
+
+-- getCommitteeCountPerSlot :: LightState -> Epoch -> Word64
+-- getCommitteeCountPerSlot state epoch = max 1 $ min maxCommitteesPerSlot (l `div` slotsPerEpoch `div` targetCommitteeSize)
+--     -- where l = (toInteger . length . validatorIndexes) state
+--     where l = fromIntegral (MV.length (getActiveValidatorIndices state epoch))
 
 -- domainTypeValues :: DomainType -> Word32
 -- domainTypeValues :: DomainType -> Integer
@@ -95,20 +103,47 @@ computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
                 newIndex = if (testBit byte (fromIntegral (position `mod` 8))) then flipP else index
             in swapOrNotRound (currentRound+1) (remainingRounds-1) newIndex indexCount_ seed
 
+shuffleList :: MV.IOVector ValidatorIndex -> ByteString -> Int -> IO ()
+shuffleList indices seed round_ = do
+    let listSize = fromIntegral $ MV.length indices
+    when (listSize == 0) $ error "Can't shuffle empty list"
+    goOneRound listSize round_
+        where goOneRound :: Word64 -> Int -> IO ()
+              goOneRound listSize !round = when (round >= 0) $ do
+                let roundAsBytes = serializeWord64 1 (fromIntegral round)
+                    pivot = unserializeByteStringToWord64 (BS.take 8 (hash (seed `BS.append` roundAsBytes))) `mod` listSize
+                    mirror1 = (pivot + 2) `div` 2
+                    mirror2 = (pivot + listSize) `div` 2
+                    initialHashBytes = BS.empty
+                swapOrNot listSize roundAsBytes pivot mirror1 mirror2 mirror1 initialHashBytes
+                goOneRound listSize (round-1)
+              swapOrNot :: Word64 -> ByteString ->  Word64 ->  Word64 -> Word64 -> Word64 -> ByteString -> IO ()
+              swapOrNot listSize roundAsBytes pivot mirror1 mirror2 !i !hashBytes = when (i <= mirror2) $ do
+                let (flip_, bitIndex) = if i <= pivot
+                                        then (pivot - i, i .&. 0xff)
+                                        else (pivot + listSize - i, flip_ .&. 0xff)
+                    newHashBytes
+                        | i <= pivot && (bitIndex == 0 || i == mirror1) = hash $ seed `BS.append` roundAsBytes `BS.append` serializeWord64 4 (i `div` 256)
+                        | (bitIndex == 0xff || i == pivot + 1)          = hash $ seed `BS.append` roundAsBytes `BS.append` serializeWord64 4 (flip_ `div` 256)
+                        | otherwise                                     = hashBytes
+                    theByte = BS.index newHashBytes (fromIntegral (bitIndex `div` 8))
+                    theBit = (theByte `shiftR` fromIntegral (bitIndex .&. 0x07)) .&. 1
+                when (theBit /= 0) $ do
+                    MV.swap indices (fromIntegral i) (fromIntegral flip_)
+                swapOrNot listSize roundAsBytes pivot mirror1 mirror2 (i+1) newHashBytes
+
+
 -- | Returns whether a validator is active for the given epoch
 isActiveValidator :: Validator -> Epoch -> Bool
 isActiveValidator validator epoch =
     activationEpoch validator <= epoch && epoch < exitEpoch validator
 
 -- | Returns the list of active validators (their indices) for the given epoch
-getActiveValidatorIndices :: LightState -> Epoch -> U.Vector ValidatorIndex
-getActiveValidatorIndices state epoch = flip U.imapMaybe (validators state) $ \i v ->
+-- getActiveValidatorIndices :: LightState -> Epoch -> U.Vector ValidatorIndex
+getActiveValidatorIndices :: LightState -> Epoch -> IO (MV.IOVector ValidatorIndex)
+getActiveValidatorIndices state epoch = U.thaw $ flip U.imapMaybe (validators state) $ \i v ->
     if isActiveValidator v epoch then Just (fromIntegral i) else Nothing
--- getActiveValidatorIndices state epoch = V.fromList $ reverse $ filterByValidity epoch (validators state) [] 0
---     where filterByValidity :: Epoch -> [Validator] -> [ValidatorIndex] -> ValidatorIndex -> [ValidatorIndex]
---           filterByValidity _ [] is _ = is
---           filterByValidity epoch_ (v:vs) is !i | isActiveValidator v epoch_ = filterByValidity epoch_ vs (i:is) (i+1)
---                                                | otherwise                  = filterByValidity epoch_ vs is (i+1)
+
 
 
 

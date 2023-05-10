@@ -14,7 +14,7 @@ import qualified Data.ByteString as BS
 -- import Crypto.Hash.SHA256 ( hash )
 import Utils
 import System.Environment ( getArgs, getProgName )
-import Control.Monad ( when )
+import Control.Monad ( when, forM_ )
 import GHC.Generics
 import Data.Aeson
 import Data.Aeson.Lens ( _String, key )
@@ -32,6 +32,9 @@ import Control.Concurrent ( threadDelay )
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import Data.Word ( Word64 )
+import qualified Data.Vector.Unboxed.Mutable as MV
+import qualified Data.Vector.Mutable as M
+import Data.Monoid (getSum)
 
 apiTokenFile :: FilePath
 apiTokenFile = "api-token.json"
@@ -108,25 +111,76 @@ runElections apiToken state epoch endEpoch = do
 
   putStr ("\tComputing list of active validators for epoch " ++ show epoch ++ "...") >> hFlush stdout
   tic2 <- getCurrentTime
-  let !activeIndices = getActiveValidatorIndices state epoch
-      !len = fromIntegral (U.length activeIndices)
+  !activeIndices <- getActiveValidatorIndices state epoch
+  let !len = fromIntegral (MV.length activeIndices)
   toc2 <- getCurrentTime
   let diff2 = diffUTCTime toc2 tic2
   putStrLn $ "(" ++ (show diff2) ++ ")"
 
-  let committeesPerSlot = getCommitteeCountPerSlot state epoch
-      count = committeesPerSlot * slotsPerEpoch
-      pairs_ = U.fromList [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
+  committeesPerSlot <- getCommitteeCountPerSlot state epoch
+  let count = committeesPerSlot * slotsPerEpoch
+      -- pairs_ = U.fromList [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
+  -- pairs_ <- U.thaw $ U.fromList [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
+  -- pairs_ <- do
+    -- v <- MV.new (fromIntegral (slotsPerEpoch * committeesPerSlot))
+    -- forM_ (range (slot, slot+slotsPerEpoch-1)) $ \s ->
+      -- forM_ (range (0, committeesPerSlot-1)) $ \i ->
+        -- MV.write v (fromIntegral ((s - slot) * committeesPerSlot + i)) (s, i)
+    -- return v
+
+  -- when (MV.length pairs_ /= fromIntegral count) $ do
+    -- error $ "Lengths are not the same"
+  
   putStrLn ("\tComputting all " ++ (show count) ++ " committees for this epoch...")
   tic3 <- getCurrentTime
   -- let computedCommittees = concat $ map (\(slot, index) -> getBeaconCommittee state activeIndices slot index) (take 10 pairs)
-  let computedCommittees = U.concatMap (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs_
-      !indexSum = U.sum computedCommittees
+  -- let computedCommittees = U.concatMap (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs_
+  -- computedCommittees <- U.concatMap (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs_
+  indexSum <- MV.new 1
+  MV.set indexSum 0
+
+  computedCommittees <- do
+    v <- M.new (fromIntegral (slotsPerEpoch * committeesPerSlot))
+    forM_ (range (slot, slot+slotsPerEpoch-1)) $ \s ->
+      forM_ (range (0, committeesPerSlot-1)) $ \i -> do
+        committee <- getBeaconCommittee state activeIndices len s i
+        M.write v (fromIntegral ((s - slot) * committeesPerSlot + i)) committee
+        val' <- MV.foldl' (+) 0 committee
+        MV.modify indexSum (\val -> val + val') 0
+    return v
+
+  -- let !indexSum = U.sum computedCommittees
+  
   toc3 <- getCurrentTime
   let !diff3 = diffUTCTime toc3 tic3
   putStrLn $ "\tComputation done in " ++ (show diff3)
 
-  putStrLn $ "\tElection passed: " ++ show (U.toList computedCommittees == U.toList (U.concat (V.toList allCommittees)))
+  equals <- MV.new 1
+  MV.set equals False
+
+  tic4 <- getCurrentTime
+  M.iforM_ computedCommittees $ \i com -> do
+    let targetCom = allCommittees V.! i
+    MV.iforM_ com $ \j comMember -> do
+      let targetMem = targetCom U.! j
+          areEqual = comMember == targetMem
+      MV.modify equals (\eq -> eq && areEqual) 0
+  
+  toc4 <- getCurrentTime
+  let diff4 = diffUTCTime toc4 tic4
+
+  isCorrect <- MV.read equals 0
+  putStrLn $ "Election is correct: " ++ show isCorrect ++ " (in " ++ show diff4 ++ ")"
+
+
+  -- putStrLn $ "all committees size: " ++ show (V.length allCommittees)
+  -- putStrLn $ "computed committees size: " ++ show (M.length computedCommittees)
+
+  -- putStrLn $ "all committees ! 35 size :" ++ show (U.length (allCommittees V.! 35))
+  -- i35 <- M.read computedCommittees 35
+  -- putStrLn $ "computed committees ! 35 size: " ++ show (MV.length i35)
+
+  -- putStrLn $ "\tElection passed: " ++ show (U.toList computedCommittees == U.toList (U.concat (V.toList allCommittees)))
   -- putStrLn $ "\tcomputed: " ++ show (V.take 10 computedCommittees)
   -- putStrLn $ "\tAll:      " ++ show (V.take 10 (V.concatMap id allCommittees))
   -- putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat (take 10 allCommittees))
