@@ -4,37 +4,29 @@
 
 module Main where
 
--- import qualified MyLib (someFunc)
 import Types
 import Committee
 import Data.Aeson
-import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString as BS
--- import qualified Data.ByteString.Lazy.Char8 as C
--- import Crypto.Hash.SHA256 ( hash )
 import Utils
 import System.Environment ( getArgs, getProgName )
 import Control.Monad ( when, forM_ )
-import GHC.Generics
-import Data.Aeson
-import Data.Aeson.Lens ( _String, key )
+import GHC.Generics ( Generic )
 import Data.Maybe ( fromJust )
 import Network.Wreq
+    ( asJSON, get, responseBody, responseStatus, statusCode )
 import Control.Lens
 import Config ( slotsPerEpoch, minSeedLookAhead, epochsPerHistoricalVector )
-import Control.Exception as E
+import Control.Exception as E ( catch, throwIO )
 import Network.HTTP.Client ( HttpException(..), HttpExceptionContent(..) )
 import Data.Ix ( range )
 import Data.Time.Clock ( getCurrentTime, diffUTCTime )
 import System.IO ( hFlush, stdout )
 import Control.Concurrent ( threadDelay )
--- import Data.Vector ( Vector )
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
-import Data.Word ( Word64 )
 import qualified Data.Vector.Unboxed.Mutable as MV
 import qualified Data.Vector.Mutable as M
-import Data.Monoid (getSum)
 
 apiTokenFile :: FilePath
 apiTokenFile = "api-token.json"
@@ -67,10 +59,6 @@ main = do
       slotForInitialRandao = startingSlot - slotsPerEpoch * 1
       catchupEpoch = read (args !! 1) :: Epoch
       validatorsFile = (args !! 2)
-  
-  -- entries <- cmData <$> fromJust <$> decodeFileStrict "./data/committee_call_ex_1.json"
-  -- print (cdeValidators (head entries))
-  -- error "STOP"
 
   -- Parse api-token file for QuickNode access
   apiToken <- fromJust <$> decodeFileStrict apiTokenFile
@@ -82,17 +70,11 @@ main = do
       initialState = LightState
         { currSlot = startingSlot
         , validators = validators_
-        -- , randaoMixes = take (fromInteger n) (repeat BS.empty) ++ (initialRandao : take (fromInteger (epochsPerHistoricalVector - n - 1)) (repeat BS.empty))
         , randaoMixes = (V.replicate (fromIntegral n) BS.empty) V.++ (initialRandao `V.cons` (V.replicate (fromIntegral (epochsPerHistoricalVector - n - 1)) BS.empty))
         }
-      -- committee = getBeaconCommittee initialState startingSlot 0
-  -- print committee
   runElections apiToken initialState startingEpoch catchupEpoch
-
-  -- cm <- fetchCommitteesAtSlot apiToken startingSlot
-  -- print (length cm)
-  -- print (length (head cm))
 ---}
+
 -- | Recursively run elections from the starting epoch up to the catching up epoch
 runElections :: APIToken -> LightState -> Epoch -> Epoch -> IO ()
 runElections apiToken state epoch endEpoch = do
@@ -119,44 +101,29 @@ runElections apiToken state epoch endEpoch = do
 
   committeesPerSlot <- getCommitteeCountPerSlot state epoch
   let count = committeesPerSlot * slotsPerEpoch
-      -- pairs_ = U.fromList [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
-  -- pairs_ <- U.thaw $ U.fromList [(s,i) | s <- range(slot, slot+slotsPerEpoch-1), i <- range(0, committeesPerSlot-1)]
-  -- pairs_ <- do
-    -- v <- MV.new (fromIntegral (slotsPerEpoch * committeesPerSlot))
-    -- forM_ (range (slot, slot+slotsPerEpoch-1)) $ \s ->
-      -- forM_ (range (0, committeesPerSlot-1)) $ \i ->
-        -- MV.write v (fromIntegral ((s - slot) * committeesPerSlot + i)) (s, i)
-    -- return v
-
-  -- when (MV.length pairs_ /= fromIntegral count) $ do
-    -- error $ "Lengths are not the same"
   
   putStrLn ("\tComputting all " ++ (show count) ++ " committees for this epoch...")
   tic3 <- getCurrentTime
-  -- let computedCommittees = concat $ map (\(slot, index) -> getBeaconCommittee state activeIndices slot index) (take 10 pairs)
-  -- let computedCommittees = U.concatMap (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs_
-  -- computedCommittees <- U.concatMap (\(slot, index) -> getBeaconCommittee state activeIndices len slot index) pairs_
-  indexSum <- MV.new 1
-  MV.set indexSum 0
+  -- indexSum <- MV.new 1
+  -- MV.set indexSum 0
 
   computedCommittees <- do
     v <- M.new (fromIntegral (slotsPerEpoch * committeesPerSlot))
     forM_ (range (slot, slot+slotsPerEpoch-1)) $ \s ->
       forM_ (range (0, committeesPerSlot-1)) $ \i -> do
-        committee <- getBeaconCommittee state activeIndices len s i
+        !committee <- getBeaconCommittee state activeIndices len s i
         M.write v (fromIntegral ((s - slot) * committeesPerSlot + i)) committee
-        val' <- MV.foldl' (+) 0 committee
-        MV.modify indexSum (\val -> val + val') 0
+        -- val' <- MV.foldl' (+) 0 committee
+        -- MV.modify indexSum (\val -> val + val') 0
     return v
-
-  -- let !indexSum = U.sum computedCommittees
   
   toc3 <- getCurrentTime
   let !diff3 = diffUTCTime toc3 tic3
   putStrLn $ "\tComputation done in " ++ (show diff3)
 
+  -- Probably stupid way to test (accumulate) comparison to test election result
   equals <- MV.new 1
-  MV.set equals False
+  MV.set equals True
 
   tic4 <- getCurrentTime
   M.iforM_ computedCommittees $ \i com -> do
@@ -171,22 +138,6 @@ runElections apiToken state epoch endEpoch = do
 
   isCorrect <- MV.read equals 0
   putStrLn $ "Election is correct: " ++ show isCorrect ++ " (in " ++ show diff4 ++ ")"
-
-
-  -- putStrLn $ "all committees size: " ++ show (V.length allCommittees)
-  -- putStrLn $ "computed committees size: " ++ show (M.length computedCommittees)
-
-  -- putStrLn $ "all committees ! 35 size :" ++ show (U.length (allCommittees V.! 35))
-  -- i35 <- M.read computedCommittees 35
-  -- putStrLn $ "computed committees ! 35 size: " ++ show (MV.length i35)
-
-  -- putStrLn $ "\tElection passed: " ++ show (U.toList computedCommittees == U.toList (U.concat (V.toList allCommittees)))
-  -- putStrLn $ "\tcomputed: " ++ show (V.take 10 computedCommittees)
-  -- putStrLn $ "\tAll:      " ++ show (V.take 10 (V.concatMap id allCommittees))
-  -- putStrLn $ "\tElection passed: " ++ show (computedCommittees == concat (take 10 allCommittees))
-  -- putStrLn $ "\tTotal number of validators: " ++ show (V.length (V.concatMap id allCommittees))
-  -- putStrLn $ "\tSum (just for eval): " ++ show indexSum
-  -- error ""
 
 
 -- | Craft a QuickNode query with the endpoint and the api token
@@ -222,17 +173,21 @@ fetchCommitteesAtSlot apiToken slot = do
     fetchCommitteesAtSlot' apiToken slot_ = do
       r <- asJSON =<< get (qnQuery apiToken ("/eth/v1/beacon/states/" ++ show slot_ ++ "/committees"))
       return (r ^. responseBody)
-    handler err@(HttpExceptionRequest _ ResponseTimeout) = do
+    handler (HttpExceptionRequest _ ResponseTimeout) = do
             putStrLn "QuickNode API request timed out, retrying in 10 s..."
             threadDelay (10 * 1000000)
             fetchCommitteesAtSlot' apiToken slot
-    handler err@(HttpExceptionRequest _ ConnectionTimeout) = do
+    handler (HttpExceptionRequest _ ConnectionTimeout) = do
             putStrLn "QuickNode APIconnection timed out, retrying in 60 s..."
             threadDelay (60 * 1000000)
             fetchCommitteesAtSlot' apiToken slot
     handler err@(HttpExceptionRequest _ _) = do
             putStrLn $ ">>> Failed to fetch committees at slot " ++ show slot ++ " from QuickNode. <<<"
             throwIO err
+    handler err = do
+      putStrLn $ "Unrecoverable error:"
+      throwIO err
+
 
 -- | Function used for quicker prototyping: get a set of committees for a given slot from a file
 -- instead of making a API call
@@ -241,55 +196,3 @@ fetchCommitteesFromFile :: FilePath -> IO (V.Vector (U.Vector ValidatorIndex))
 fetchCommitteesFromFile file = do
   cData <- fromJust <$> decodeFileStrict file
   return $ V.fromList (map cdeValidators (cmData cData))
-
-{-
-
-main :: IO ()
-main = do
-  putStrLn $ "Test RANDAO election"
-  -- raw <- BS.readFile "/Users/nschoe/Downloads/committee_call_ex_1.json"
-  -- let committeeData = decode raw :: Maybe CommitteeData
-  -- putStrLn $ "Decoded: " ++ show committeeData
-
-  -- raw <- BS.readFile "./data/one_validator.json"
-  -- let validator = eitherDecode raw :: Either String Validator
-  -- putStrLn $ "Validator: " ++ show validator
-
-  -- raw <- BS.readFile "./data/all_validators.json"
-  -- let (Just validatorsData) = decode raw :: Maybe ValidatorsData
-      -- validators = vdData validatorsData
-  -- putStrLn $ "Parsed " ++ (show (length validators)) ++ " validators."
-  -- putStrLn $ show $ take 3 validators
-
-  -- Parse validators (for now, static, from file, hand-fetched for the given epoch)
-  -- raw <- BS.readFile "./data/all_validators.json"
-  raw <- LBS.readFile "./data/all_validators_195094.json" -- Getting a more up-to-date list of validators should not influence (due to indices)
-  let (Just validatorsData) = decode raw :: Maybe ValidatorsData
-      allValidators = vdData validatorsData
-
-  let startingSlot = 6149664
-      -- initialRandao = 0x374677f793d1fecca4ffad2287319d2406fa7025a1b754ebefc8dedff843e37f -- Same as above, but with the hash + xor applied (so next one)
-      initialRandao = BS.reverse (serializeInteger 0x374677f793d1fecca4ffad2287319d2406fa7025a1b754ebefc8dedff843e37f 32)-- Same as above, but with the hash + xor applied (so next one)
-      initialState = LightState
-        { currSlot   = startingSlot
-        , validators = allValidators
-        -- , randaoMixes = take 61103 (repeat 0) ++ (61104 : take (65536 - 61103 - 1) (repeat 0))
-        , randaoMixes = take 61103 (repeat BS.empty) ++ (initialRandao : take (65536 - 61103 - 1) (repeat BS.empty))
-        }
-      epoch = epochFromSlot (currSlot initialState)
-
-  putStr $ "Initial slot: " ++ show (currSlot initialState)
-  putStrLn $ " (epoch: " ++ show epoch ++ ")"
-  putStr $ "Nb of validators: " ++ show (length (validators initialState))
-  putStrLn $ " (" ++ show (length (getActiveValidatorIndices initialState epoch)) ++ " active for this epoch)"
-  -- First check if we can find the committee for the starting slot
-  let computedCommittee = getBeaconCommittee initialState startingSlot 1
-  putStrLn $ "Computed committee (" ++ show (length computedCommittee) ++ " members): " ++ show computedCommittee
-  
---   putStrLn $ "Computed proposer index: " ++ show (getBeaconProposerIndex initialState)
---   let bstr = BS.pack [1, 0, 0, 0, 252, 150, 0, 0, 0, 0, 0, 0, 49, 29, 74, 22, 244, 77, 146, 10, 137, 181, 24, 34, 54, 181, 252, 139, 118, 78, 89, 239, 168, 84, 170, 151, 40, 22, 241, 164, 19, 186, 31, 47]
-
-  -- let committeeIdx = 111111
-      -- val = (validators initialState) !! committeeIdx
-  -- putStrLn $ "Committee @ " ++ show committeeIdx ++ ": is active (" ++ show (isActiveValidator val epoch) ++ ")\n" ++ show val
-  ---}
