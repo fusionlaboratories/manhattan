@@ -10,7 +10,7 @@ import Data.Aeson
 import qualified Data.ByteString as BS
 import Utils
 import System.Environment ( getArgs, getProgName )
-import Control.Monad ( when, forM_ )
+import Control.Monad ( when, forM_, unless )
 import GHC.Generics ( Generic )
 import Data.Maybe ( fromJust )
 import Network.Wreq
@@ -100,23 +100,29 @@ runElections apiToken state epoch endEpoch = do
   putStrLn $ "(" ++ (show diff2) ++ ")"
 
   committeesPerSlot <- getCommitteeCountPerSlot state epoch
-  let count = committeesPerSlot * slotsPerEpoch
-  
+  let count = fromIntegral $ committeesPerSlot * slotsPerEpoch
+
   putStrLn ("\tComputting all " ++ (show count) ++ " committees for this epoch...")
   tic3 <- getCurrentTime
-  -- indexSum <- MV.new 1
-  -- MV.set indexSum 0
+
+  -- DIRTY and TEMPORARY trick to shuffle only once
+  isShuffled <- MV.new 1
+  -- MV.set isShuffled False
+  MV.set isShuffled 1
+
+-- Copy the active indices BEFORE passing it to getBeaconCommittee, doh!
+  copyIndices <- MV.clone activeIndices
 
   computedCommittees <- do
-    v <- M.new (fromIntegral (slotsPerEpoch * committeesPerSlot))
+    v <- M.new count
     forM_ (range (slot, slot+slotsPerEpoch-1)) $ \s ->
       forM_ (range (0, committeesPerSlot-1)) $ \i -> do
-        !committee <- getBeaconCommittee state activeIndices len s i
+        -- putStrLn $ "(" ++ show s ++ ", " ++ show i ++ ") -> " ++ show ((s - slot) * committeesPerSlot + i) ++ ")"
+        -- !committee <- getBeaconCommittee isShuffled state activeIndices len s i
+        !committee <- getBeaconCommittee isShuffled state copyIndices len s i
         M.write v (fromIntegral ((s - slot) * committeesPerSlot + i)) committee
-        -- val' <- MV.foldl' (+) 0 committee
-        -- MV.modify indexSum (\val -> val + val') 0
     return v
-  
+
   toc3 <- getCurrentTime
   let !diff3 = diffUTCTime toc3 tic3
   putStrLn $ "\tComputation done in " ++ (show diff3)
@@ -125,20 +131,38 @@ runElections apiToken state epoch endEpoch = do
   equals <- MV.new 1
   MV.set equals True
 
-  tic4 <- getCurrentTime
+  -- DEBUG: just to count number of wrongly swapped indices
+  comps <- MV.new 2
+  MV.set comps (0 :: Int)
+
   M.iforM_ computedCommittees $ \i com -> do
     let targetCom = allCommittees V.! i
     MV.iforM_ com $ \j comMember -> do
       let targetMem = targetCom U.! j
           areEqual = comMember == targetMem
+          z = if areEqual then 0 else 1
+      -- unless areEqual $ do
+        -- putStrLn $ "com# " ++ show i ++ ", mem# " ++ show j ++ " are DIFFERENT"
+      MV.modify comps (\val -> val + 1) z
       MV.modify equals (\eq -> eq && areEqual) 0
-  
-  toc4 <- getCurrentTime
-  let diff4 = diffUTCTime toc4 tic4
 
   isCorrect <- MV.read equals 0
-  putStrLn $ "Election is correct: " ++ show isCorrect ++ " (in " ++ show diff4 ++ ")"
+  putStrLn $ "\tElection is correct: " ++ show isCorrect
+  
+  nbEq <- MV.read comps 0
+  nbDiff <- MV.read comps 1
 
+  putStrLn $ "\tNB equals: " ++ show nbEq
+  putStrLn $ "\tNB diffs: " ++ show nbDiff
+
+  let m = 100
+  cOne <- M.read computedCommittees m
+  putStr $ "computed[" ++ show m ++ "]: "
+  MV.forM_ cOne $ \member -> putStr $ show member ++ ", "
+  putStrLn ""
+
+  let aOne = allCommittees V.! m
+  putStrLn $ "all[" ++ show m ++ "]: " ++ show aOne
 
 -- | Craft a QuickNode query with the endpoint and the api token
 -- This is mostly a utility function

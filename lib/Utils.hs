@@ -88,6 +88,7 @@ computeShuffledIndex = swapOrNotRound 0 shuffleRoundCount
 --   client and are only interested in one index)
 shuffleList :: MV.IOVector ValidatorIndex -> ByteString -> Int -> IO ()
 shuffleList indices seed round_ = do
+    putStrLn $ "Shuffling entire list"
     let listSize = fromIntegral $ MV.length indices
     when (listSize == 0) $ error "Can't shuffle empty list"
     goOneRound listSize round_
@@ -107,11 +108,12 @@ shuffleList indices seed round_ = do
                                         else (pivot + listSize - i, flip_ .&. 0xff)
                     newHashBytes
                         | i <= pivot && (bitIndex == 0 || i == mirror1) = hash $ seed `BS.append` roundAsBytes `BS.append` serializeWord64 4 (i `div` 256)
-                        | (bitIndex == 0xff || i == pivot + 1)          = hash $ seed `BS.append` roundAsBytes `BS.append` serializeWord64 4 (flip_ `div` 256)
+                        | i > pivot && (bitIndex == 0xff || i == pivot + 1)          = hash $ seed `BS.append` roundAsBytes `BS.append` serializeWord64 4 (flip_ `div` 256)
                         | otherwise                                     = hashBytes
                     theByte = BS.index newHashBytes (fromIntegral (bitIndex `div` 8))
                     theBit = (theByte `shiftR` fromIntegral (bitIndex .&. 0x07)) .&. 1
                 when (theBit /= 0) $ do
+                    -- putStrLn $ "\t\t\t\tSwapping " ++ show i ++ " and " ++ show flip_
                     MV.swap indices (fromIntegral i) (fromIntegral flip_)
                 swapOrNot listSize roundAsBytes pivot mirror1 mirror2 (i+1) newHashBytes
 
