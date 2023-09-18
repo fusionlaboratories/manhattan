@@ -42,7 +42,7 @@ instance FromJSON APIToken where
     <$> v .: "endpoint"
     <*> v .: "token"
 
---{-
+{-
 main :: IO ()
 main = do
   putStrLn ""
@@ -75,21 +75,81 @@ main = do
   runElections apiToken initialState startingEpoch catchupEpoch
 ---}
 
+main :: IO ()
+main = do
+  putStrLn ""
+  putStrLn "Manhattan Test :: RANDAO election"
+
+  -- Starting Epoch is passed as argument for now
+  args <- getArgs
+  when (length args < 3) $ do
+    progName <- getProgName
+    error $ "Usage: " ++ progName ++ " <epoch-start> <epoch-catchup> <validators-file> where\n\t<epoch-start> is the starting Epoch\n\t<epoch-catchup> is the epoch number from which the validators file was fetched\n\t<validators-file> is the path to the JSON file containing the most-recent fetched validators list"
+
+  let startingEpoch = read (head args) :: Epoch
+      startingSlot = firstSlotFromEpoch startingEpoch
+      catchupEpoch = read (args !! 1) :: Epoch
+      validatorsFile = (args !! 2)
+
+  -- Parse validators from file passed as argument
+  validators_ <- vdData <$> fromJust <$> decodeFileStrict validatorsFile
+
+  let initialState = LightState
+        { currSlot = startingSlot
+        , validators = validators_
+        , randaoMixes = V.replicate (fromIntegral epochsPerHistoricalVector) BS.empty
+        }
+
+  -- Parse api-token file for QuickNode access
+  apiToken <- fromJust <$> decodeFileStrict apiTokenFile
+
+  runElections apiToken initialState startingEpoch catchupEpoch
+
+  -- block <- fetchNextBlockFromSlot apiToken slotForInitialRandao
+  
+  -- let initialRandao = prevRandao block
+      -- Compute the index at which to insert the initial 
+      -- n = (startingEpoch + epochsPerHistoricalVector - minSeedLookAhead - 1) `mod` epochsPerHistoricalVector
+      -- initialState = LightState
+        -- { currSlot = startingSlot
+        -- , validators = validators_
+        -- , randaoMixes = (V.replicate (fromIntegral n) BS.empty) V.++ (initialRandao `V.cons` (V.replicate (fromIntegral (epochsPerHistoricalVector - n - 1)) BS.empty))
+        -- }
+  runElections apiToken initialState startingEpoch catchupEpoch
+
 -- | Recursively run elections from the starting epoch up to the catching up epoch
 runElections :: APIToken -> LightState -> Epoch -> Epoch -> IO ()
-runElections apiToken state epoch endEpoch = do
+runElections apiToken state' !epoch endEpoch = when (epoch <= endEpoch) $ do
   putStrLn $ "Election for Epoch " ++ (show epoch) ++ "/" ++ (show endEpoch) ++ " (" ++ show (endEpoch - epoch) ++ " remaining to catchup)"
+
   -- Compute the fist slot of the epoch
   let slot = firstSlotFromEpoch epoch
-  -- putStr ("\tFetching committees from chain...") >> hFlush stdout
-  putStr ("\tFetching committees from file...") >> hFlush stdout
-  tic1 <- getCurrentTime
+      firstSlot = firstSlotFromEpoch epoch
+      slotForRandaoMix = firstSlot - slotsPerEpoch * 1
+
+  putStrLn "\tFetching randao seed from chain..."
+  -- Fetch corresponding block to get the randao mix
+  randaoMix <- prevRandao <$> fetchNextBlockFromSlot apiToken slotForRandaoMix
+
+  -- Compute index at which this new randaoMix goes
+  let n = (epoch + epochsPerHistoricalVector - minSeedLookAhead - 1) `mod` epochsPerHistoricalVector
+
+  -- Insert the randao mix in the state
+  let !state = state' {
+    randaoMixes = (V.//) (randaoMixes state') [(fromIntegral n, randaoMix)]
+  }
+
+  -- Fetch actual, elected committee from the chain (to match against, this is just verification)
+  putStrLn "\tFetching committees from chain..."
+  -- putStr ("\tFetching committees from file...") >> hFlush stdout
+
+  -- tic1 <- getCurrentTime
   -- Fetch all committes for all slots in this epoch
-  -- allCommittees <- fetchCommitteesAtSlot apiToken slot
-  !allCommittees <- fetchCommitteesFromFile "./data/committee_call_ex_1.json"
-  toc1 <- getCurrentTime
-  let diff1 = diffUTCTime toc1 tic1
-  putStrLn $ "(" ++ (show diff1) ++ ")"
+  allCommittees <- fetchCommitteesAtSlot apiToken slot
+  -- !allCommittees <- fetchCommitteesFromFile "./data/committee_call_ex_1.json"
+  -- toc1 <- getCurrentTime
+  -- let diff1 = diffUTCTime toc1 tic1
+  -- putStrLn $ "(" ++ (show diff1) ++ ")"
 
   putStr ("\tComputing list of active validators for epoch " ++ show epoch ++ "...") >> hFlush stdout
   tic2 <- getCurrentTime
@@ -132,8 +192,8 @@ runElections apiToken state epoch endEpoch = do
   MV.set equals True
 
   -- DEBUG: just to count number of wrongly swapped indices
-  comps <- MV.new 2
-  MV.set comps (0 :: Int)
+  -- comps <- MV.new 2
+  -- MV.set comps (0 :: Int)
 
   M.iforM_ computedCommittees $ \i com -> do
     let targetCom = allCommittees V.! i
@@ -143,26 +203,29 @@ runElections apiToken state epoch endEpoch = do
           z = if areEqual then 0 else 1
       -- unless areEqual $ do
         -- putStrLn $ "com# " ++ show i ++ ", mem# " ++ show j ++ " are DIFFERENT"
-      MV.modify comps (\val -> val + 1) z
+      -- MV.modify comps (\val -> val + 1) z
       MV.modify equals (\eq -> eq && areEqual) 0
 
   isCorrect <- MV.read equals 0
-  putStrLn $ "\tElection is correct: " ++ show isCorrect
-  
-  nbEq <- MV.read comps 0
-  nbDiff <- MV.read comps 1
-
-  putStrLn $ "\tNB equals: " ++ show nbEq
-  putStrLn $ "\tNB diffs: " ++ show nbDiff
-
-  let m = 100
-  cOne <- M.read computedCommittees m
-  putStr $ "computed[" ++ show m ++ "]: "
-  MV.forM_ cOne $ \member -> putStr $ show member ++ ", "
+  putStrLn $ "\tElection (for Epoch " ++ show epoch ++ ") is correct: " ++ show isCorrect
   putStrLn ""
 
-  let aOne = allCommittees V.! m
-  putStrLn $ "all[" ++ show m ++ "]: " ++ show aOne
+  runElections apiToken state (epoch+1) endEpoch
+  
+  -- nbEq <- MV.read comps 0
+  -- nbDiff <- MV.read comps 1
+
+  -- putStrLn $ "\tNB equals: " ++ show nbEq
+  -- putStrLn $ "\tNB diffs: " ++ show nbDiff
+
+  -- let m = 100
+  -- cOne <- M.read computedCommittees m
+  -- putStr $ "computed[" ++ show m ++ "]: "
+  -- MV.forM_ cOne $ \member -> putStr $ show member ++ ", "
+  -- putStrLn ""
+
+  -- let aOne = allCommittees V.! m
+  -- putStrLn $ "all[" ++ show m ++ "]: " ++ show aOne
 
 -- | Craft a QuickNode query with the endpoint and the api token
 -- This is mostly a utility function
@@ -189,27 +252,27 @@ fetchNextBlockFromSlot apiToken slot = fetchBlockAtSlot apiToken slot `E.catch` 
 -- fetchCommitteesAtSlot :: APIToken -> Slot -> IO [[ValidatorIndex]]
 fetchCommitteesAtSlot :: APIToken -> Slot -> IO (V.Vector (U.Vector ValidatorIndex))
 fetchCommitteesAtSlot apiToken slot = do
-  cData <- fetchCommitteesAtSlot' apiToken slot `E.catch` handler
+  cData <- fetchCommitteesAtSlot' slot `E.catch` handler
   -- return (concat $ map cdeValidators (cmData cData))
   return $ V.fromList (map cdeValidators (cmData cData))
   where
-    fetchCommitteesAtSlot' :: APIToken -> Slot -> IO CommitteeData
-    fetchCommitteesAtSlot' apiToken slot_ = do
+    fetchCommitteesAtSlot' :: Slot -> IO CommitteeData
+    fetchCommitteesAtSlot' slot_ = do
       r <- asJSON =<< get (qnQuery apiToken ("/eth/v1/beacon/states/" ++ show slot_ ++ "/committees"))
       return (r ^. responseBody)
     handler (HttpExceptionRequest _ ResponseTimeout) = do
-            putStrLn "QuickNode API request timed out, retrying in 10 s..."
+            putStrLn "\tQuickNode API request timed out, retrying in 10 s..."
             threadDelay (10 * 1000000)
-            fetchCommitteesAtSlot' apiToken slot
+            fetchCommitteesAtSlot' slot
     handler (HttpExceptionRequest _ ConnectionTimeout) = do
-            putStrLn "QuickNode APIconnection timed out, retrying in 60 s..."
+            putStrLn "\tQuickNode APIconnection timed out, retrying in 60 s..."
             threadDelay (60 * 1000000)
-            fetchCommitteesAtSlot' apiToken slot
+            fetchCommitteesAtSlot' slot
     handler err@(HttpExceptionRequest _ _) = do
-            putStrLn $ ">>> Failed to fetch committees at slot " ++ show slot ++ " from QuickNode. <<<"
+            putStrLn $ "\t>>> Failed to fetch committees at slot " ++ show slot ++ " from QuickNode. <<<"
             throwIO err
     handler err = do
-      putStrLn $ "Unrecoverable error:"
+      putStrLn $ "\tUnrecoverable error:"
       throwIO err
 
 

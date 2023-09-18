@@ -78,6 +78,8 @@ library
                     , data-serializer
                     , aeson
                     , vector >= 0.13.0.0
+                    , hex-text
+                    -- NOTE: hex-text is not actually needed, it's just for pretty printing in ghci
 
     -- Directories containing source files.
     hs-source-dirs:   lib
@@ -110,6 +112,8 @@ executable manhattan
         , http-client
         , time
         , vector >= 0.13.0.0
+
+    ghc-options: -rtsopts
 
     -- Directories containing source files.
     hs-source-dirs:   app
